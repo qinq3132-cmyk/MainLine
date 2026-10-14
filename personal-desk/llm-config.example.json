@@ -1,0 +1,10 @@
+{
+  "provider_name": "My API",
+  "base_url": "https://api.example.com/v1",
+  "api_key": "{env:MY_MODEL_API_KEY}",
+  "models": [
+    {"id": "your-model-id", "name": "My model"}
+  ],
+  "default_model": "your-model-id",
+  "use_opencode": false
+}

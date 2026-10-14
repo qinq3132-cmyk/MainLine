@@ -1,0 +1,210 @@
+import copy
+import datetime as dt
+import json
+from pathlib import Path
+import sys
+import tempfile
+import threading
+import unittest
+import urllib.error
+import urllib.request
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import server
+
+
+class FakeModels:
+    entries = {}
+    default = ''
+    def public(self): return {'models': [], 'default': '', 'error': ''}
+    def reload(self): pass
+
+
+class StoreTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = server.Store(self.temp.name)
+        self.pid = self.store.all('projects')[0]['id']
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def task(self, **kw):
+        return self.store.task({'title': '实验方案', 'project_id': self.pid, **kw})
+
+    def test_jsonc_urls_comments_and_trailing_commas(self):
+        text = '{"baseURL":"https://example.test/v1", // URL remains intact\n"quoted":"a,}", "list":[1, /* comment */], /* end */}'
+        self.assertEqual(server.jsonc(text), {'baseURL': 'https://example.test/v1', 'quoted': 'a,}', 'list': [1]})
+
+    def test_conflict_rejection_and_archive_restore(self):
+        day = (server.now().date()+dt.timedelta(days=1)).isoformat()
+        a = self.task(scheduled_at=day+'T10:00', duration=90)
+        with self.assertRaisesRegex(ValueError, '冲突'):
+            self.task(title='会议', scheduled_at=day+'T11:00', duration=30)
+        self.assertEqual(len(self.store.all('tasks')), 1)
+        self.store.put('tasks', {**a, 'deleted_at': server.stamp()})
+        b = self.task(title='占用时间', scheduled_at=day+'T10:30')
+        with self.assertRaisesRegex(ValueError, '冲突'):
+            self.store.task({'restore': True}, a['id'])
+        self.assertTrue(self.store.get('tasks', a['id'])['deleted_at'])
+        self.store.put('tasks', {**b, 'deleted_at': server.stamp()})
+        restored = self.store.task({'restore': True}, a['id'])
+        self.assertEqual(restored['deleted_at'], '')
+
+    def test_recurring_completion_is_idempotent_including_undo(self):
+        t = self.task(kind='habit', repeat='daily')
+        self.store.task({'status':'done'}, t['id'])
+        self.store.task({'status':'done'}, t['id'])
+        self.store.task({'status':'todo'}, t['id'])
+        self.store.task({'status':'done'}, t['id'])
+        children = [x for x in self.store.all('tasks') if x.get('repeat_parent') == t['id']]
+        self.assertEqual(len(children), 1)
+        self.assertEqual(children[0]['occurrence'], (server.now().date()+dt.timedelta(days=1)).isoformat())
+        with self.assertRaisesRegex(ValueError, '尚未到期'):
+            self.store.task({'status':'done'}, children[0]['id'])
+
+    def test_monthly_recurrence_preserves_day_31(self):
+        first=dt.datetime(2027,1,31,9)
+        feb=server.next_repeat(first,'monthly',31)
+        march=server.next_repeat(feb,'monthly',31)
+        self.assertEqual(feb.day, 28)
+        self.assertEqual(march.day, 31)
+
+    def test_weekdays_skip_weekend(self):
+        self.assertEqual(server.next_repeat(dt.datetime(2026,10,16,9),'weekdays').date(), dt.date(2026,10,19))
+
+    def test_scheduler_preserves_fixed_times_and_deep_blocks(self):
+        moment=dt.datetime(2026,10,14,8)
+        with patch.object(server,'now',return_value=moment):
+            fixed=self.task(title='固定会议',kind='event',fixed=True,scheduled_at='2026-10-14T09:00',duration=90)
+            deep=self.task(title='创业思考',kind='deep',duration=90)
+            regular=self.task(title='检查结果',duration=60)
+            waiting=self.task(title='等待同学',status='waiting')
+            backlog=self.task(title='暂存想法',important=False,urgent=False)
+            plan=server.build_plan(self.store.all('tasks'),self.store.settings(),'2026-10-14',7)
+            indexed={x['id']:x for x in plan['items']}
+            self.assertNotIn(fixed['id'], indexed)
+            self.assertNotIn(waiting['id'], indexed)
+            self.assertNotIn(backlog['id'], indexed)
+            self.assertEqual(indexed[deep['id']]['scheduled_at'], '2026-10-15T09:00')
+            self.assertEqual(indexed[regular['id']]['scheduled_at'], '2026-10-14T13:00')
+            staged=[{**t, 'scheduled_at': indexed[t['id']]['scheduled_at']} if t['id'] in indexed else t for t in self.store.all('tasks')]
+            for t in staged:
+                self.assertEqual(self.store.conflicts(t,staged), [])
+
+    def test_capacity_deadline_and_not_before_repeat(self):
+        with patch.object(server,'now',return_value=dt.datetime(2026,10,14,8)):
+            huge=self.task(duration=600,deadline='2026-10-14')
+            plan=server.build_plan(self.store.all('tasks'),self.store.settings(),'2026-10-14',1)
+            self.assertEqual(plan['items'], [])
+            self.assertEqual(plan['unplaced'][0]['id'],huge['id'])
+            t=self.task(title='下次事项',repeat='weekly',duration=30)
+            self.store.put('tasks',{**t,'occurrence':'2026-10-19'})
+            plan=server.build_plan(self.store.all('tasks'),self.store.settings(),'2026-10-14',7,[t['id']])
+            self.assertGreaterEqual(plan['items'][0]['scheduled_at'][:10],'2026-10-19')
+
+    def test_restore_validated_before_overwrite_and_backup(self):
+        task=self.task()
+        original=self.store.export()
+        invalid=copy.deepcopy(original);invalid['settings']['workdays']=[]
+        with self.assertRaises(ValueError):self.store.restore(invalid)
+        self.assertEqual(self.store.get('tasks',task['id'])['title'],task['title'])
+        self.assertFalse((Path(self.temp.name)/'backups').exists())
+        self.store.task({'title':'修改后的方案'},task['id'])
+        result=self.store.restore(original)
+        self.assertEqual(self.store.get('tasks',task['id'])['title'],task['title'])
+        self.assertTrue((Path(self.temp.name)/'backups'/result['backup']).is_file())
+
+    def test_import_rejects_markup_in_record_ids(self):
+        data=self.store.export();data['projects'][0]['id']='bad" onclick="evil'
+        with self.assertRaises(ValueError):self.store.restore(data)
+
+    def test_recurring_forecast_reserves_future_time_and_can_edit_source(self):
+        day=(server.now().date()+dt.timedelta(days=1)).isoformat()
+        t=self.task(title='每天阅读',repeat='daily',scheduled_at=day+'T14:00',duration=30)
+        later=(server.now().date()+dt.timedelta(days=3)).isoformat()
+        with self.assertRaisesRegex(ValueError,'冲突'):
+            self.task(title='未来会议',scheduled_at=later+'T14:00')
+        moved=self.store.task({'scheduled_at':day+'T15:00'},t['id'])
+        self.assertEqual(moved['scheduled_at'],day+'T15:00')
+        self.assertEqual(len(self.store.all('tasks')),1)
+
+    def test_monthly_forecast_does_not_drift_after_short_month(self):
+        t=self.task(repeat='monthly',scheduled_at='2027-01-31T10:00',duration=30)
+        preview=server.recurring_previews([t],dt.date(2027,2,1),dt.date(2027,3,31))
+        self.assertEqual([x['scheduled_at'] for x in preview],['2027-02-28T10:00','2027-03-31T10:00'])
+
+
+class ApiTests(unittest.TestCase):
+    def setUp(self):
+        self.temp=tempfile.TemporaryDirectory()
+        self.store=server.Store(self.temp.name)
+        self.server=server.DeskServer(('127.0.0.1',0),self.store,FakeModels())
+        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True)
+        self.thread.start()
+        self.base=f'http://127.0.0.1:{self.server.server_port}'
+
+    def tearDown(self):
+        self.server.shutdown();self.server.server_close();self.server.assistant.pool.shutdown(wait=True)
+        self.temp.cleanup()
+
+    def request(self,path,method='GET',body=None,headers=None):
+        req=urllib.request.Request(self.base+path,data=json.dumps(body).encode() if body is not None else None,method=method,
+                                   headers={'X-Personal-Desk':'1','Content-Type':'application/json',**(headers or {})})
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=10) as response:return json.loads(response.read())
+
+    def test_health_is_safe_and_model_endpoint_contains_no_key_fields(self):
+        health=self.request('/api/health');self.assertEqual(health['app'],'personal-desk')
+        self.assertNotIn('key',self.request('/api/models'))
+
+    def test_cross_origin_and_missing_request_header_rejected(self):
+        with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/tasks','POST',{'title':'bad'}, {'Origin':'https://untrusted.test'})
+        self.assertEqual(error.exception.code,403)
+        request=urllib.request.Request(self.base+'/api/state')
+        with self.assertRaises(urllib.error.HTTPError) as error:urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request)
+        self.assertEqual(error.exception.code,403)
+        self.assertEqual(self.store.all('tasks'),[])
+
+    def test_atomic_plan_rejects_stale_schedule_without_partial_writes(self):
+        a=self.request('/api/tasks','POST',{'title':'思考A','kind':'deep','duration':60})
+        b=self.request('/api/tasks','POST',{'title':'思考B','kind':'deep','duration':60})
+        day=(server.now().date()+dt.timedelta(days=1)).isoformat()
+        fixed=self.request('/api/tasks','POST',{'title':'会议','kind':'event','fixed':True,'scheduled_at':day+'T10:00'})
+        with self.assertRaises(urllib.error.HTTPError) as error:self.request('/api/plan/apply','POST',{'items':[{'id':a['id'],'scheduled_at':day+'T09:00'},{'id':b['id'],'scheduled_at':day+'T10:00'}]})
+        self.assertEqual(error.exception.code,400)
+        self.assertEqual(self.store.get('tasks',a['id'])['scheduled_at'],'')
+        self.assertEqual(self.store.get('tasks',b['id'])['scheduled_at'],'')
+        result=self.request('/api/plan/apply','POST',{'items':[{'id':a['id'],'scheduled_at':day+'T09:00'},{'id':b['id'],'scheduled_at':day+'T11:00'}]})
+        self.assertEqual(result['count'],2)
+        self.assertEqual(self.store.get('tasks',fixed['id'])['scheduled_at'],day+'T10:00')
+
+    def test_task_persistence_and_focus_idempotency(self):
+        t=self.request('/api/tasks','POST',{'title':'持续阅读'})
+        focus={'id':'focus-session-1','task_id':t['id'],'minutes':25}
+        self.request('/api/focus','POST',focus);self.request('/api/focus','POST',focus)
+        reloaded=server.Store(self.temp.name)
+        self.assertEqual(reloaded.get('tasks',t['id'])['spent_minutes'],25)
+        self.assertEqual(len(reloaded.all('focus')),1)
+
+    def test_ai_apply_idempotent_and_fixed_meeting_is_not_moved(self):
+        day=(server.now().date()+dt.timedelta(days=1)).isoformat()
+        fixed=self.request('/api/tasks','POST',{'title':'固定会议','kind':'event','scheduled_at':day+'T10:00','fixed':True})
+        job={'id':'test-job','status':'done','applied':[],'result':{'tasks':[{'title':'新任务'}],
+             'updates':[{'id':fixed['id'],'changes':{'scheduled_at':day+'T11:00'},'reason':'移动'}]}}
+        self.store.put('jobs',job)
+        first=self.request('/api/ai/apply','POST',{'job_id':job['id'],'selected':['task:0','update:0']})
+        self.assertEqual(len(first['applied']),1)
+        self.assertEqual(len(first['skipped']),1)
+        second=self.request('/api/ai/apply','POST',{'job_id':job['id'],'selected':['task:0']})
+        self.assertEqual(second['applied'],[])
+        self.assertEqual(self.store.get('tasks',fixed['id'])['scheduled_at'],day+'T10:00')
+
+    def test_reminder_deduplication(self):
+        t=self.request('/api/tasks','POST',{'title':'检查学生结果','followup_date':server.now().date().isoformat(),'status':'waiting'})
+        self.server.assistant.tick(allow_ai=False);self.server.assistant.tick(allow_ai=False)
+        n=[x for x in self.store.all('notifications') if x['task_id']==t['id']]
+        self.assertEqual(len(n),1)
+
+
+if __name__=='__main__':unittest.main()

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#4263eb">
+  <title>主线 · Mainline</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/refined.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <a href="#home" class="brand" aria-label="主线 Mainline 首页"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>主线<small>MAINLINE</small></span></a>
+    <div class="sidebar-caption">让重要的事持续向前</div>
+    <nav aria-label="主要页面">
+      <button class="nav-item active" data-nav="home"><span aria-hidden="true">◈</span>四象限</button>
+      <button class="nav-item" data-nav="projects"><span aria-hidden="true">▧</span>项目</button>
+      <button class="nav-item" data-nav="overview"><span aria-hidden="true">▦</span>周与月</button>
+      <button class="nav-item" data-nav="goals"><span aria-hidden="true">◎</span>长期目标</button>
+      <button class="nav-item" data-nav="habits"><span aria-hidden="true">◌</span>长期投入</button>
+      <button class="nav-item" data-nav="trash"><span aria-hidden="true">↶</span>回收站</button>
+    </nav>
+    <div class="sidebar-label">我的项目<button class="icon-button" data-action="new-project" aria-label="添加项目">＋</button></div>
+    <div id="project-navigation"></div>
+    <div class="sidebar-footer"><span class="service-status" id="service-status">● 正在连接本机</span><button class="nav-item" data-action="settings"><span aria-hidden="true">⚙</span>偏好与数据</button><small>本机保存 · 上海时区</small></div>
+  </aside>
+  <main class="workspace">
+    <header class="topbar"><div class="date-label" id="date-label"></div><div class="top-actions"><button class="quiet-button" data-action="notifications" id="notification-button">提醒 <span id="notification-count">0</span></button><button class="quiet-button assistant-toggle" data-action="toggle-assistant">AI 秘书</button><button class="primary-button" data-action="new-task">＋ 新建事项</button></div></header>
+    <section class="page-heading"><div><div class="eyebrow" id="page-eyebrow">YOUR ATTENTION, WELL PLACED</div><h1 id="page-title">把注意力放回重要的事</h1><p id="page-description">科研、创业和生活，放在同一张全景里。</p></div><button class="quiet-button" data-action="plan" id="plan-button">✦ 帮我安排时间</button></section>
+    <div class="view-toolbar"><label class="search-box"><span aria-hidden="true">⌕</span><input id="task-search" type="search" placeholder="搜索" aria-label="搜索事项"></label><select id="project-filter" aria-label="筛选项目"><option value="">全部项目</option></select><label class="check-label"><input type="checkbox" id="show-done">显示已完成</label><button class="quiet-button" data-action="clear-filter" id="clear-filter" hidden>清除筛选</button></div>
+    <div id="page-content" aria-live="polite"></div>
+    <div id="focus-bar" hidden></div>
+  </main>
+  <aside class="assistant-panel" id="assistant-panel" aria-label="AI 个人秘书">
+    <div class="assistant-header"><span class="assistant-orb" aria-hidden="true">✦</span><div><h2>个人秘书</h2><p>梳理事情，也跟进下一步</p></div><button class="icon-button mobile-close" data-action="toggle-assistant" aria-label="收起秘书">×</button></div>
+    <label class="model-label" for="ai-model">秘书模型</label><select id="ai-model" aria-label="秘书模型"></select>
+    <div class="assistant-modes" role="group" aria-label="秘书操作"><button data-mode="capture" class="active">整理事情</button><button data-mode="review">回顾推进</button><button data-mode="chat">讨论计划</button></div>
+    <label class="sr-only" for="ai-input">告诉秘书需要处理的事情</label><textarea id="ai-input" rows="5" placeholder="说说你的安排，或添加文件。"></textarea>
+    <div class="attachment-toolbar"><button class="quiet-button" data-action="upload-word">＋ Word</button><button class="quiet-button" data-action="upload-ppt">＋ PPT</button><button class="quiet-button" data-action="upload-file">＋ 文件</button><button class="icon-button" data-action="file-library" aria-label="文件库" title="文件库">▧</button></div>
+    <input type="file" id="word-upload" accept=".docx" multiple hidden><input type="file" id="ppt-upload" accept=".pptx" multiple hidden><input type="file" id="other-upload" accept=".pdf,.txt,.md,.csv,.xlsx" multiple hidden>
+    <div id="selected-files"></div>
+    <div class="assistant-submit"><small id="ai-mode-hint">先整理建议，再选择加入任务</small><button class="primary-button" id="ai-submit" data-action="ai-submit">帮我梳理 ↗</button></div>
+    <div id="ai-status" role="status" aria-live="polite"></div>
+    <div id="ai-result"></div>
+    <details class="conversation-history"><summary>对话记录</summary><div id="conversation-history"></div></details>
+    <div class="assistant-footnote">秘书依据你的记录判断进度。后台运行时会检查截止日期、等待事项和每日回顾。</div>
+  </aside>
+</div>
+<dialog id="task-dialog" class="editor-dialog">
+  <form id="task-form">
+    <div class="dialog-heading"><div><div class="eyebrow">ONE CLEAR NEXT STEP</div><h2 id="task-editor-title">新建事项</h2></div><button type="button" class="icon-button" data-close="task-dialog" aria-label="关闭">×</button></div>
+    <input type="hidden" name="id">
+    <label class="field">事项名称<input name="title" required maxlength="300" placeholder="写下一项可执行的行动"></label>
+    <div class="form-grid"><label class="field">所属项目<select name="project_id" id="task-project"></select></label><label class="field">事项类型<select name="kind"><option value="task">推进任务</option><option value="deep">深度思考</option><option value="habit">长期投入</option><option value="event">固定约定 / 会议</option></select></label><label class="field">状态<select name="status"><option value="todo">待办</option><option value="doing">推进中</option><option value="waiting">等待他人</option><option value="done">已完成</option></select></label><label class="field">预计时长 · 分钟<input name="duration" type="number" min="5" max="1440" step="5" value="60" required></label></div>
+    <label class="field">关联长期目标<select name="goal_id" id="task-goal"></select></label><div class="priority-fields"><label class="check-label"><input type="checkbox" name="important" checked>重要</label><label class="check-label"><input type="checkbox" name="urgent">紧急</label><label class="check-label"><input type="checkbox" name="fixed">固定时间，排期时保留</label></div>
+    <div class="form-grid"><label class="field">截止日期<input name="deadline" type="date"></label><label class="field">计划执行时间<input name="scheduled_at" type="datetime-local"></label><label class="field">负责人 / 等待谁<input name="assignee" maxlength="100" placeholder="自己或协作者"></label><label class="field">下次检查日期<input name="followup_date" type="date"></label><label class="field">重复规则<select name="repeat"><option value="none">不重复</option><option value="daily">每天</option><option value="weekdays">工作日（周一至周五）</option><option value="weekly">每周</option><option value="monthly">每月</option></select></label><div class="field helper-field">完成重复事项后自动创建下一次；连续思考会优先安排在深度工作时段。</div></div>
+    <label class="field">备注与预期产出<textarea name="notes" rows="3" maxlength="20000" placeholder="需要什么信息？完成后应该得到什么？"></textarea></label>
+    <label class="field">子任务 · 每行一项<textarea name="checklist_text" rows="3" placeholder="[ ] 确定方案&#10;[x] 收集已有结果"></textarea></label>
+    <div class="form-error" id="task-error" role="alert"></div>
+    <footer class="dialog-footer"><div><button type="button" class="danger-button" data-action="archive-task" id="archive-task" hidden>移入回收站</button><button type="button" class="quiet-button" data-action="start-focus" id="start-focus" hidden>开始专注</button></div><button class="primary-button" type="submit">保存事项</button></footer>
+  </form>
+</dialog>
+<dialog id="goal-dialog" class="editor-dialog">
+  <form id="goal-form"><div class="dialog-heading"><h2 id="goal-editor-title">设定长期目标</h2><button type="button" class="icon-button" data-close="goal-dialog" aria-label="关闭">×</button></div>
+    <input name="id" type="hidden"><label class="field">我要走向哪里<input name="title" required maxlength="200" placeholder="写下一个值得长期投入的方向"></label>
+    <label class="field">期望成为 / 实现<textarea name="vision" rows="3" maxlength="5000"></textarea></label>
+    <label class="field">每周为此做什么<input name="commitment" maxlength="1000"></label>
+    <div class="form-grid"><label class="field">领域<select name="area"><option>个人科研</option><option>科研组 A</option><option>科研组 B</option><option>创业探索</option><option>生活与关系</option></select></label><label class="field">状态<select name="status"><option value="active">持续投入</option><option value="paused">暂时搁置</option><option value="completed">已实现</option></select></label>
+    <label class="field">回顾频率<select name="review_days"><option value="7">每周</option><option value="14">每两周</option><option value="30">每月</option><option value="90">每季</option></select></label><label class="field">下次回顾<input name="next_review" type="date" required></label></div>
+    <label class="check-label"><input name="pinned" type="checkbox" checked>在首页提醒自己</label>
+    <details class="goal-details"><summary>更多</summary><label class="field">为什么值得长期做<textarea name="why" rows="3" maxlength="5000"></textarea></label><label class="field">愿景日期（可留空）<input name="horizon" type="date"></label></details>
+    <div id="goal-error" class="form-error" role="alert"></div><footer class="dialog-footer"><button class="primary-button" type="submit">保存目标</button></footer>
+  </form>
+</dialog>
+<dialog id="goal-review-dialog" class="editor-dialog"><form id="goal-review-form"><div class="dialog-heading"><h2 id="goal-review-title">回顾目标</h2><button type="button" class="icon-button" data-close="goal-review-dialog" aria-label="关闭">×</button></div><input name="id" type="hidden"><div id="goal-review-context"></div><label class="field">这段时间走了哪一步<textarea name="note" rows="5" required maxlength="10000" placeholder="记录实际进展，以及下一步"></textarea></label><div id="goal-review-error" class="form-error" role="alert"></div><footer class="dialog-footer"><button type="submit" class="primary-button">记下这次回顾</button></footer></form></dialog>
+<dialog id="files-dialog" class="wide-dialog"><div class="dialog-heading"><h2>文件库</h2><button class="icon-button" data-close="files-dialog" aria-label="关闭">×</button></div><div id="files-list"></div><details id="file-preview" hidden><summary id="file-preview-title">提取的文字</summary><p id="file-preview-warning"></p><pre id="file-preview-text"></pre></details></dialog>
+<dialog id="project-dialog" class="editor-dialog">
+  <form id="project-form"><div class="dialog-heading"><div><div class="eyebrow">MAKE PROGRESS VISIBLE</div><h2 id="project-editor-title">新建项目</h2></div><button type="button" class="icon-button" data-close="project-dialog" aria-label="关闭">×</button></div><input type="hidden" name="id"><label class="field">项目名称<input name="name" required maxlength="150"></label><div class="form-grid"><label class="field">所属领域<select name="area"><option>科研组 A</option><option>科研组 B</option><option>个人科研</option><option>创业探索</option><option>生活与关系</option></select></label><label class="field">识别颜色<input type="color" name="color" value="#4263eb"></label><label class="field">目标日期<input type="date" name="deadline"></label></div><label class="field">项目目标<textarea name="goal" rows="3" placeholder="这个项目最终要达成什么？"></textarea></label><label class="field">里程碑 · 每行一项<textarea name="milestones_text" rows="4" placeholder="[x] 明确问题&#10;[ ] 实验验证&#10;[ ] 论文完成"></textarea></label><div id="project-error" class="form-error" role="alert"></div><footer class="dialog-footer"><button type="button" class="danger-button" data-action="delete-project" id="delete-project" hidden>删除空项目</button><button class="primary-button" type="submit">保存项目</button></footer></form>
+</dialog>
+<dialog id="settings-dialog" class="editor-dialog settings-dialog">
+ <form id="settings-form"><div class="dialog-heading"><div><div class="eyebrow">A RHYTHM THAT FITS YOU</div><h2>偏好与数据</h2></div><button type="button" class="icon-button" data-close="settings-dialog" aria-label="关闭">×</button></div><h3>你的时间边界</h3><div class="form-grid"><label class="field">工作开始<input type="time" name="work_start" required></label><label class="field">工作结束<input type="time" name="work_end" required></label><label class="field">午休开始<input type="time" name="lunch_start" required></label><label class="field">午休结束<input type="time" name="lunch_end" required></label><label class="field">深度工作开始<input type="time" name="deep_start" required></label><label class="field">深度工作结束<input type="time" name="deep_end" required></label><label class="field">事项之间缓冲 · 分钟<input type="number" name="buffer_minutes" min="0" max="120" required></label><label class="field">每天最多排满多少<select name="capacity"><option value="0.5">50% · 宽松</option><option value="0.65">65% · 留有余地</option><option value="0.75">75% · 推荐</option><option value="0.85">85% · 紧凑</option><option value="1">100% · 排满</option></select></label></div><div class="field">工作日<div class="workday-picks" id="workday-picks"></div></div><h3>持续跟进</h3><label class="check-label"><input type="checkbox" name="review_enabled">每天自动准备一份 AI 推进回顾</label><div class="form-grid"><label class="field">每日回顾时间<input type="time" name="review_time" required></label><label class="field">安排开始前提醒 · 分钟<input type="number" name="reminder_minutes" min="0" max="1440" required></label></div><p class="help-text">后台运行时会检查安排、截止日期和跟进节点。自动回顾会调用当前模型；电脑关机期间不运行，恢复后会补查当天事项。</p><div class="settings-actions"><button type="button" class="quiet-button" data-action="desktop-notifications">开启浏览器桌面提醒</button></div>
+<h3>模型连接</h3><p id="model-config-status" class="help-text"></p>
+<details id="llm-configuration"><summary>配置自己的 API</summary><div class="llm-fields">
+<label class="field" for="llm-provider">连接名称<input id="llm-provider" maxlength="100" placeholder="我的模型服务" autocomplete="off"></label>
+<label class="field" for="llm-base">API 根地址<input id="llm-base" type="url" placeholder="https://api.example.com/v1" autocomplete="off" spellcheck="false"></label>
+<label class="field" for="llm-models">模型 ID · 每行一个<textarea id="llm-models" rows="3" placeholder="填写服务商提供的模型 ID" spellcheck="false"></textarea></label>
+<label class="field" for="llm-key">API Key<input id="llm-key" type="password" autocomplete="new-password" spellcheck="false" placeholder="填写自己的密钥"></label>
+<label class="check-label"><input id="llm-clear-key" type="checkbox">清除已保存的密钥</label>
+<label class="check-label llm-opencode"><input id="llm-opencode" type="checkbox">兼容本机 OpenCode（可选）</label>
+<p class="help-text">密钥只保存到本机配置，不进入任务导出。留空保留已有密钥。</p>
+<div class="settings-actions"><button type="button" class="primary-button" data-action="save-llm-config" id="save-llm-config">保存模型配置</button></div><div id="llm-config-error" class="form-error" role="alert"></div></div></details>
+<div class="settings-actions model-tools"><button type="button" class="quiet-button" data-action="test-api">测试模型连接</button><button type="button" class="quiet-button" data-action="reload-models">重新读取模型配置</button></div><h3>数据与备份</h3><div class="settings-actions"><button type="button" class="quiet-button" data-action="export">导出全部任务</button><button type="button" class="quiet-button" data-action="backup">创建本机数据库备份</button><label class="quiet-button file-button">从导出文件恢复<input type="file" id="import-file" accept="application/json,.json" hidden></label></div><p class="help-text">恢复会替换当前任务、项目和偏好，并先自动保留本机数据库备份。导出文件不含 API 密钥。</p><div id="settings-error" class="form-error" role="alert"></div><footer class="dialog-footer"><span></span><button class="primary-button" type="submit">保存偏好</button></footer></form>
+</dialog>
+<dialog id="plan-dialog" class="wide-dialog"><div class="dialog-heading"><div><div class="eyebrow">SPACE FOR WHAT MATTERS</div><h2>安排未来的时间</h2></div><button class="icon-button" data-close="plan-dialog" aria-label="关闭">×</button></div><div class="plan-controls"><label class="field">从哪一天开始<input type="date" id="plan-start"></label><label class="field">范围<select id="plan-days"><option value="7">未来一周</option><option value="14">未来两周</option><option value="31">未来一个月</option></select></label><button class="primary-button" data-action="generate-plan" id="generate-plan">生成排期建议</button></div><p class="help-text">保留已有安排，避开午休和冲突；深度思考优先占用连续时段，等待他人的事项只保留检查节点。</p><div id="plan-result"></div><div id="plan-error" class="form-error" role="alert"></div><footer class="dialog-footer"><span id="plan-count"></span><button class="primary-button" data-action="apply-plan" id="apply-plan" hidden>应用所选安排</button></footer></dialog>
+<dialog id="notifications-dialog" class="editor-dialog"><div class="dialog-heading"><div><div class="eyebrow">NOTHING IMPORTANT SLIPS</div><h2>提醒与跟进</h2></div><button class="icon-button" data-close="notifications-dialog" aria-label="关闭">×</button></div><button class="quiet-button" data-action="read-notifications">全部标记已读</button><div id="notifications-list"></div></dialog>
+<dialog id="day-dialog" class="editor-dialog"><div class="dialog-heading"><div><div class="eyebrow">A DAY AT A GLANCE</div><h2 id="day-title"></h2></div><button class="icon-button" data-close="day-dialog" aria-label="关闭">×</button></div><div id="day-content"></div><footer class="dialog-footer"><span></span><button class="primary-button" data-action="new-day-task">＋ 为这天添加事项</button></footer></dialog>
+<div id="toast-container" role="status" aria-live="polite"></div>
+<noscript>主线 Mainline 需要启用 JavaScript。</noscript>
+</body>
+</html>
