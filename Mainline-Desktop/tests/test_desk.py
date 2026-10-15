@@ -36,8 +36,8 @@ class StoreTests(unittest.TestCase):
     def test_two_level_projects_preserve_category_links_owner_and_activity(self):
         category = self.store.all('projects')[0]
         self.assertEqual(self.store.category(category['area'])['id'], category['id'])
-        project = self.store.project({'name': '脑机接口波形生成', 'area': category['area'],
-                                      'owner': '马一瑞', 'progress': 40})
+        project = self.store.project({'name': '示例研究项目', 'area': category['area'],
+                                      'owner': '项目负责人', 'progress': 40})
         activity = self.store.project({'name': '组内聚餐', 'area': category['area'], 'project_type': 'activity'})
         meeting = self.task(title='聚餐订位', kind='event')
         self.store.restore(self.store.export())
@@ -45,7 +45,7 @@ class StoreTests(unittest.TestCase):
         by_id = {p['id']: p for p in state['projects']}
         self.assertEqual(by_id[category['id']]['project_type'], 'category')
         self.assertEqual(by_id[project['id']]['project_type'], 'project')
-        self.assertEqual(by_id[project['id']]['owner'], '马一瑞')
+        self.assertEqual(by_id[project['id']]['owner'], '项目负责人')
         self.assertEqual(by_id[project['id']]['progress'], 40)
         self.assertEqual(by_id[activity['id']]['project_type'], 'activity')
         self.assertEqual(self.store.get('tasks', meeting['id'])['project_id'], category['id'])
@@ -216,9 +216,9 @@ class ApiTests(unittest.TestCase):
         category = self.request('/api/categories', 'POST', {'name': '新研究组'})
         again = self.request('/api/categories', 'POST', {'name': '新研究组'})
         self.assertEqual(category['id'], again['id'])
-        project = self.request('/api/projects', 'POST', {'name': '脑机接口波形生成', 'area': '新研究组',
-                                                       'owner': '马一瑞', 'progress': 40})
-        self.assertEqual(project['owner'], '马一瑞')
+        project = self.request('/api/projects', 'POST', {'name': '示例研究项目', 'area': '新研究组',
+                                                       'owner': '项目负责人', 'progress': 40})
+        self.assertEqual(project['owner'], '项目负责人')
         with self.assertRaises(urllib.error.HTTPError) as error:
             self.request('/api/projects/'+category['id'], 'DELETE', {})
         self.assertEqual(error.exception.code, 400)

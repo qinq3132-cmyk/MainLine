@@ -61,6 +61,19 @@ class ServerChanMemoryTests(unittest.TestCase):
         self.assertEqual(self.store.push_status(server.now().date().isoformat())['used_today'], 1)
         self.assertEqual(self.store.push_status(server.now().date().isoformat())['last_result'], 'failed')
 
+    def test_opted_in_title_never_includes_assignee_or_notes(self):
+        self.assistant.serverchan.save({'sendkey': KEY, 'enabled': True, 'include_titles': True}, server.stamp())
+        self.store.task({'title': '示例事项', 'project_id': self.project_id,
+                         'assignee': '某位同事', 'notes': '私人备注',
+                         'followup_date': server.now().date().isoformat()})
+        self.assistant.tick(allow_ai=False)
+        with patch.object(server, 'send_serverchan', return_value=True) as send:
+            self.assertTrue(self.assistant.flush_push())
+        sent = ' '.join(send.call_args.args[1:])
+        self.assertIn('示例事项', sent)
+        self.assertNotIn('某位同事', sent)
+        self.assertNotIn('私人备注', sent)
+
     def test_daily_five_attempt_limit_includes_test(self):
         self.enable()
         with patch.object(server, 'send_serverchan', return_value=True) as send:

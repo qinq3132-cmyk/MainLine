@@ -29,21 +29,21 @@ assert.equal(render("projectProgress({id:'c',name:'通信组',area:'通信组',p
 context.state.settings.areas=['通信组','生活与关系'];
 context.state.projects=[
   {id:'c',name:'通信组',area:'通信组',progress:90},
-  {id:'p',name:'脑机接口波形生成',area:'通信组',owner:'马一瑞',project_type:'project',progress:40},
+  {id:'p',name:'示例研究项目',area:'通信组',owner:'项目负责人',project_type:'project',progress:40},
   {id:'a',name:'聚餐',area:'通信组',project_type:'activity',progress:50,tracks:[{title:'准备',percent:50}]},
 ];
 context.state.tasks=[{id:'event',title:'预订餐厅',kind:'event',project_id:'c',status:'todo'}];
 let categories=render('projectsView()');
 assert.match(categories, /通信组/);
-assert.doesNotMatch(categories, /progressbar|总体进度|项目进度|40%|脑机接口波形生成/);
+assert.doesNotMatch(categories, /progressbar|总体进度|项目进度|40%|示例研究项目/);
 context.projectArea='通信组';
 let inside=render('projectsView()');
-assert.match(inside, /脑机接口波形生成/);
-assert.match(inside, /马一瑞/);
+assert.match(inside, /示例研究项目/);
+assert.match(inside, /项目负责人/);
 assert.match(inside, /aria-valuenow="40"/);
 assert.match(inside, /预订餐厅/);
 assert.doesNotMatch(render("projectCards([state.projects[2]])"), /progressbar|50%/);
-context.search='马一瑞';context.projectArea='';
+context.search='项目负责人';context.projectArea='';
 assert.match(render('projectsView()'), /通信组/);
 assert.doesNotMatch(render('projectsView()'), /生活与关系/);
 context.search='';context.state.projects=[];context.state.tasks=[];

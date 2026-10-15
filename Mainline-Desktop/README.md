@@ -4,7 +4,7 @@
 
 ## 打开和停止
 
-可从 GitHub [直接下载单文件 EXE](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v2.exe)，放到自己选择的文件夹后双击运行；无需安装 Python。详细步骤见 [Windows EXE 安装说明](Windows-EXE-安装.md)。它是免安装桌面版，不是 Setup 安装器。
+可从 GitHub [直接下载单文件 EXE](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v3.exe)，放到自己选择的文件夹后双击运行；无需安装 Python。详细步骤见 [Windows EXE 安装说明](Windows-EXE-安装.md)。它是免安装桌面版，不是 Setup 安装器。
 
 本机验收过的文件夹版位于 `release/2026-10-15/Mainline/Mainline.exe`。使用文件夹版时必须保留同目录的 `_internal` 文件夹；不要只复制其中的 EXE。
 
@@ -48,7 +48,7 @@ API 密钥由后台读取，不返回浏览器，也不加入任务数据库和�
 
 后台每分钟检查一次提醒，网页每 30 秒读取新状态。**后台运行但网页关闭时，提醒仍会入库；浏览器桌面通知需要网页保持打开并允许通知。** 在 EXE 设置中填入自己的 [Server酱 Turbo SendKey](https://sct.ftqq.com/docs/getting-started/sendkey/)，保存并开启微信提醒后，可选择“开启关窗后提醒”。这个按钮会创建 Windows 定时任务，每 5 分钟检查一次；关闭功能会移除任务。电脑需开机且登录；关机、睡眠或离线期间无法即时发送。
 
-微信只推送安排即将开始、今天到期、逾期和进度检查提醒；同一轮合并。按免费档本机限制每天最多 5 次发送尝试，测试消息和失败请求也占一次，不自动重试；超出额度的提醒仍留在本机。默认不发送事项名称，可在设置中主动开启。SendKey 只写在本机数据目录的 `serverchan-config.json`，不进入数据库、导出、EXE 或 Git。服务商的[当前额度说明](https://sct.ftqq.com/docs/getting-started/faq/)以官网为准。
+微信只推送安排即将开始、今天到期、逾期和进度检查提醒；同一轮合并。按免费档本机限制每天最多 5 次发送尝试，测试消息和失败请求也占一次，不自动重试；超出额度的提醒仍留在本机。默认不发送事项名称；主动开启后也只发送事项名称，不发送负责人、备注或附件内容。SendKey 只写在本机数据目录的 `serverchan-config.json`，不进入数据库、导出、EXE 或 Git。服务商的[当前额度说明](https://sct.ftqq.com/docs/getting-started/faq/)以官网为准。
 
 自动回顾不会自行写入任务、移动会议或向别人发送消息。缺少的项目进度依据需要你提供；模型不会直接读取组员实验系统。
 

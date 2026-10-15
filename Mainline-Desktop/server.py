@@ -1011,7 +1011,7 @@ updates 为建议更新已有事项，每项为 {"id":"已有ID","changes":{...�
         if not config['enabled'] or not config['sendkey']:
             return False
         day = now().date().isoformat()
-        active = {t['id'] for t in self.store.all('tasks') if not t.get('deleted_at') and t['status'] in ACTIVE}
+        active = {t['id']: t for t in self.store.all('tasks') if not t.get('deleted_at') and t['status'] in ACTIVE}
         allowed = ('start-', 'due-', 'follow-', 'overdue-')
         cutoff = max(day + 'T00:00:00', config['enabled_at'])
         pending = [n for n in self.store.all('notifications') if n['id'].startswith(allowed) and not n.get('read')
@@ -1021,11 +1021,17 @@ updates 为建议更新已有事项，每项为 {"id":"已有ID","changes":{...�
             return False
         chosen = [n for n in pending if n['id'] in reservation['notification_ids']]
         count = len(chosen)
+        def push_label(notification):
+            if not config['include_titles']:
+                return '请打开主线查看'
+            task_title = active[notification['task_id']]['title']
+            return re.sub(r'[\r\n]+', ' ', str(task_title)).strip()[:120]
+
         if count == 1:
-            title = '主线提醒：' + (chosen[0]['body'] if config['include_titles'] else chosen[0]['title'])
+            title = '主线提醒：' + (push_label(chosen[0]) if config['include_titles'] else chosen[0]['title'])
         else:
             title = f'主线提醒：{count} 项需要处理'
-        lines = [f"- {n['title']}：{n['body'] if config['include_titles'] else '请打开主线查看'}" for n in chosen]
+        lines = [f"- {n['title']}：{push_label(n)}" for n in chosen]
         success = send_serverchan(config['sendkey'], title, '\n'.join(lines))
         self.store.finish_push(reservation, success)
         return success
