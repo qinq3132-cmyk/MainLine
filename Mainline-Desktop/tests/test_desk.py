@@ -7,6 +7,7 @@ import tempfile
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from unittest.mock import patch
 
@@ -56,6 +57,36 @@ class StoreTests(unittest.TestCase):
             self.assertIn('项目判断', json.dumps(assistant.context('项目判断'), ensure_ascii=False))
         finally:
             assistant.pool.shutdown(wait=False, cancel_futures=True)
+
+    def test_project_folder_is_external_scoped_and_preserved_without_copying_files(self):
+        p=self.store.project({'name':'示例研究项目','area':'通信组','folder_path':'ignored'})
+        self.assertEqual(p['folder_path'],'')
+        parent=Path(self.temp.name)/'external-documents';parent.mkdir()
+        root=parent/'项目资料'
+        linked=self.store.bind_project_folder(p['id'],str(root),create=True)
+        self.assertTrue(root.is_dir())
+        self.assertEqual(linked['folder_path'],str(root.resolve()))
+        self.store.create_project_subfolder(p['id'],'','实验记录')
+        self.store.add_project_document(p['id'],'实验记录','记录.txt','本地文件'.encode())
+        self.assertEqual(self.store.project_documents(p['id'],'实验记录')['items'][0]['name'],'记录.txt')
+        with self.assertRaisesRegex(ValueError,'同名'):
+            self.store.add_project_document(p['id'],'实验记录','记录.txt',b'overwrite')
+        with self.assertRaises(ValueError):self.store.project_documents(p['id'],'../')
+        with self.assertRaises(ValueError):self.store.create_project_subfolder(p['id'],'','..')
+        with self.assertRaises(ValueError):self.store.add_project_document(p['id'],'','..\\outside.txt',b'bad')
+        self.store.add_project_document(p['id'],'','danger.exe',b'not executable in test')
+        with self.assertRaises(ValueError):self.store.open_project_document(p['id'],'danger.exe')
+        with patch.object(server.os,'startfile') as opener:
+            self.store.open_project_document(p['id'],'实验记录/记录.txt')
+            opener.assert_called_once()
+        with self.assertRaises(ValueError):self.store.bind_project_folder(self.pid,str(root))
+        assistant=server.Assistant(self.store,FakeModels())
+        try:self.assertTrue(all('folder_path' not in project for project in assistant.context()['projects']))
+        finally:assistant.pool.shutdown(wait=False,cancel_futures=True)
+        exported=self.store.export();self.store.restore(exported)
+        self.assertEqual(self.store.get('projects',p['id'])['folder_path'],str(root.resolve()))
+        self.store.bind_project_folder(p['id'],'')
+        self.assertTrue((root/'实验记录'/'记录.txt').is_file())
 
     def test_two_level_projects_preserve_category_links_owner_and_activity(self):
         category = self.store.all('projects')[0]
@@ -247,6 +278,26 @@ class ApiTests(unittest.TestCase):
         self.request('/api/notes/'+note['id'],'PATCH',{'restore':True})
         self.assertEqual(self.store.get('notes',note['id'])['content'],'修订后的判断')
         self.assertFalse(self.store.get('notes',note['id'])['deleted_at'])
+
+    def test_project_document_routes_bind_list_and_upload_to_selected_folder(self):
+        p=self.request('/api/projects','POST',{'name':'示例研究项目','area':'通信组'})
+        root=Path(self.temp.name)/'docs'
+        self.request('/api/project-documents/'+p['id']+'/bind','POST',{'path':str(root),'create':True})
+        self.request('/api/project-documents/'+p['id']+'/mkdir','POST',{'path':'','name':'阶段一'})
+        boundary='sample-boundary-123'
+        payload=(f'--{boundary}\r\nContent-Disposition: form-data; name="path"\r\n\r\n阶段一\r\n'
+                 f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="计划.txt"\r\nContent-Type: text/plain\r\n\r\n').encode()+b'hello\r\n'+f'--{boundary}--\r\n'.encode()
+        req=urllib.request.Request(self.base+'/api/project-documents/'+p['id']+'/upload',data=payload,method='POST',headers={'X-Personal-Desk':'1','Content-Type':'multipart/form-data; boundary='+boundary})
+        try:
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req,timeout=10) as response:self.assertEqual(response.status,201)
+        except urllib.error.HTTPError as error:
+            self.fail(error.read().decode('utf-8'))
+        listing=self.request('/api/project-documents/'+p['id']+'?path='+urllib.parse.quote('阶段一'))
+        self.assertEqual(listing['items'][0]['name'],'计划.txt')
+        self.assertEqual((root/'阶段一'/'计划.txt').read_bytes(),b'hello')
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.request('/api/project-documents/'+p['id']+'?path=..%2F')
+        self.assertEqual(error.exception.code,400)
 
     def test_category_api_is_idempotent_and_prevents_deleting_parent_with_projects(self):
         category = self.request('/api/categories', 'POST', {'name': '新研究组'})

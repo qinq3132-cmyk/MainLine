@@ -28,7 +28,7 @@ import server as backend  # noqa: E402
 import background_reminders  # noqa: E402
 
 APP_NAME = 'Mainline'
-APP_DATA_VERSION = '2026-10-15-v4'
+APP_DATA_VERSION = '2026-10-15-v5'
 DEFAULT_PORT = 5179
 
 
@@ -140,6 +140,18 @@ def setup_error_log(data_dir: Path) -> None:
             pass
 
 
+class DesktopBridge:
+    def __init__(self):
+        self.window = None
+
+    def choose_folder(self):
+        if self.window is None:
+            return ''
+        import webview
+        selected = self.window.create_file_dialog(webview.FileDialog.FOLDER)
+        return str(selected[0]) if selected else ''
+
+
 def main() -> int:
     data_dir = Path(os.environ.get('MAINLINE_DATA_DIR') or user_data_dir())
     data_dir.mkdir(parents=True, exist_ok=True)
@@ -207,7 +219,9 @@ def main() -> int:
             srv.assistant.pool.shutdown(wait=False, cancel_futures=True)
         return 0
 
-    window = webview.create_window(APP_NAME, url, width=1280, height=860, min_size=(960, 640))
+    bridge = DesktopBridge()
+    window = webview.create_window(APP_NAME, url, width=1280, height=860, min_size=(960, 640), js_api=bridge)
+    bridge.window = window
 
     def reload_when_ready():
         # WebView2 can finish creating the window before the HTTP service accepts

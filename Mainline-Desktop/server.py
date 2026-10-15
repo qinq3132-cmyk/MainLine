@@ -588,6 +588,8 @@ class Store:
         if not name or len(name) > 150:
             raise ValueError('项目名称需要 1–150 个字符。')
         p = {**old, **data, 'id': item_id or uid(), 'name': name, 'updated_at': stamp()}
+        # Folder locations are managed by the dedicated local-file endpoint.
+        p['folder_path'] = old.get('folder_path', '')
         p['area'] = str(p.get('area') or AREAS[2])[:100]
         p['project_type'] = project_type(p) if old or 'project_type' in data else 'project'
         owner = p.get('owner', '')
@@ -623,6 +625,120 @@ class Store:
         p.setdefault('created_at', stamp())
         p.setdefault('deleted_at', '')
         return self.put('projects', p)
+
+    def project_folder(self, project_id):
+        p = self.get('projects', project_id)
+        if not p or p.get('deleted_at') or project_type(p) != 'project':
+            raise ValueError('请选择现有的具体项目。')
+        raw = p.get('folder_path') or ''
+        if not raw:
+            raise ValueError('这个项目尚未关联本机文件夹。')
+        try:
+            root = Path(raw).resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise ValueError('关联的文件夹已不存在，请重新选择位置。') from None
+        if not root.is_dir():
+            raise ValueError('关联的位置不是文件夹。')
+        return p, root
+
+    def bind_project_folder(self, project_id, raw_path, create=False):
+        p = self.get('projects', project_id)
+        if not p or p.get('deleted_at') or project_type(p) != 'project':
+            raise ValueError('请选择现有的具体项目。')
+        if not isinstance(raw_path, str) or len(raw_path) > 1000 or type(create) is not bool:
+            raise ValueError('文件夹位置格式不正确。')
+        if not raw_path.strip():
+            return self.put('projects', {**p, 'folder_path': '', 'updated_at': stamp()})
+        path = Path(raw_path.strip()).expanduser()
+        if not path.is_absolute():
+            raise ValueError('请输入完整的本机文件夹路径。')
+        if create and not path.exists():
+            if not path.parent.is_dir():
+                raise ValueError('上一级文件夹不存在，请先选择已有位置。')
+            path.mkdir()
+        if not path.is_dir():
+            raise ValueError('文件夹不存在或无法访问。')
+        root = path.resolve(strict=True)
+        return self.put('projects', {**p, 'folder_path': str(root), 'updated_at': stamp()})
+
+    @staticmethod
+    def document_path(root, relative='', directory=False):
+        if not isinstance(relative, str) or len(relative) > 1000:
+            raise ValueError('文件路径无效。')
+        parts = relative.split('/') if relative else []
+        if any(not part or part in {'.', '..'} or '\\' in part or ':' in part for part in parts):
+            raise ValueError('文件路径无效。')
+        try:
+            path = root.joinpath(*parts).resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise ValueError('文件或文件夹已不存在。') from None
+        if not path.is_relative_to(root):
+            raise ValueError('不能访问项目文件夹之外的位置。')
+        if directory and not path.is_dir():
+            raise ValueError('请选择一个文件夹。')
+        return path
+
+    def project_documents(self, project_id, relative=''):
+        _, root = self.project_folder(project_id)
+        directory = self.document_path(root, relative, directory=True)
+        children = []
+        for child in directory.iterdir():
+            try:
+                if child.is_symlink() or not child.resolve(strict=True).is_relative_to(root):
+                    continue
+                info = child.stat()
+                children.append({'name': child.name, 'path': relative + ('/' if relative else '') + child.name,
+                                 'directory': child.is_dir(), 'size': info.st_size if child.is_file() else 0,
+                                 'modified': dt.datetime.fromtimestamp(info.st_mtime).isoformat(timespec='seconds')})
+            except (OSError, RuntimeError):
+                continue
+        children.sort(key=lambda x: (not x['directory'], x['name'].casefold()))
+        return {'project_id': project_id, 'root': str(root), 'path': relative,
+                'parent': relative.rpartition('/')[0], 'items': children[:300], 'truncated': len(children) > 300}
+
+    def create_project_subfolder(self, project_id, relative, name):
+        _, root = self.project_folder(project_id)
+        parent = self.document_path(root, relative, directory=True)
+        if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
+            raise ValueError('文件夹名称需要 1–100 字。')
+        name = name.strip()
+        if (name in {'.', '..'} or name.endswith('.') or re.search(r'[<>:"/\\|?*\x00-\x1f]', name)
+                or re.fullmatch(r'(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?', name)):
+            raise ValueError('文件夹名称含有 Windows 不允许的字符。')
+        target = parent / name
+        try:
+            target.mkdir()
+        except FileExistsError:
+            raise ValueError('同名文件或文件夹已存在。') from None
+        return {'path': relative + ('/' if relative else '') + name}
+
+    def add_project_document(self, project_id, relative, filename, content):
+        _, root = self.project_folder(project_id)
+        parent = self.document_path(root, relative, directory=True)
+        if (not isinstance(filename, str) or not 1 <= len(filename) <= 200 or filename != Path(filename).name
+                or filename in {'.', '..'} or filename.endswith((' ', '.'))
+                or re.search(r'[<>:"/\\|?*\x00-\x1f]', filename)
+                or re.fullmatch(r'(?i)(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?', filename)):
+            raise ValueError('文件名无效。')
+        if content is None or len(content) > MAX_FILE_BYTES:
+            raise ValueError('请选择一个不超过 20 MB 的文件。')
+        target = parent / filename
+        try:
+            with target.open('xb') as output:
+                output.write(content)
+        except FileExistsError:
+            raise ValueError('同名文件已存在，未覆盖原文件。') from None
+        return {'path': relative + ('/' if relative else '') + filename, 'size': len(content)}
+
+    def open_project_document(self, project_id, relative):
+        _, root = self.project_folder(project_id)
+        target = self.document_path(root, relative)
+        if target.is_file() and target.suffix.lower() not in {'.pdf', '.docx', '.pptx', '.xlsx', '.txt', '.md', '.csv', '.png', '.jpg', '.jpeg', '.gif', '.webp'}:
+            raise ValueError('此类型请在资源管理器中查看，应用不会直接运行它。')
+        if not target.is_file() and not target.is_dir():
+            raise ValueError('文件不可打开。')
+        os.startfile(str(target))
+        return {'opened': True}
 
     def category(self, name):
         if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
@@ -768,6 +884,8 @@ class Store:
             project_type(p)
             if not isinstance(p.get('owner', ''), str) or len(p.get('owner', '')) > 100:
                 raise ValueError('备份项目负责人格式无效。')
+            if not isinstance(p.get('folder_path', ''), str) or len(p.get('folder_path', '')) > 1000:
+                raise ValueError('备份项目文件夹路径无效。')
             clean_projects.append(p)
         ids, clean_tasks = set(), []
         for t in tasks:
@@ -914,7 +1032,8 @@ class Assistant:
     def context(self, query=''):
         state = self.store.state()
         tasks = [t for t in state['tasks'] if not t.get('deleted_at') and t['status'] in ACTIVE]
-        projects = [p for p in state['projects'] if not p.get('deleted_at')]
+        projects = [{k: v for k, v in p.items() if k != 'folder_path'}
+                    for p in state['projects'] if not p.get('deleted_at')]
         notes = [n for n in state['notes'] if not n.get('deleted_at')]
         terms = {query[i:i+2] for i in range(max(0, min(len(query), 500)-1)) if not query[i:i+2].isspace()}
         def note_score(note):
@@ -1211,6 +1330,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self.send_json(200, {'areas': self.server.store.settings().get('areas', AREAS)})
                 if path == '/api/export':
                     return self.send_json(200, self.server.store.export())
+                if path.startswith('/api/project-documents/'):
+                    parts = path.split('/')
+                    if len(parts) == 4:
+                        query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                        return self.send_json(200, self.server.store.project_documents(parts[3], query.get('path', [''])[0]))
                 if path.startswith('/api/files/'):
                     record = self.server.store.get('files', path.split('/')[-1])
                     if not record or record.get('deleted_at'):
@@ -1222,6 +1346,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     job = self.server.store.get('jobs', path.split('/')[-1])
                     return self.send_json(200 if job else 404, job or {'error': '请求不存在'})
                 return self.send_json(404, {'error': '接口不存在'})
+            except (ValueError, TypeError) as exc:
+                return self.send_json(400, {'error': str(exc) or '读取位置无效。'})
             except Exception:
                 return self.send_json(500, {'error': '读取数据失败，请稍后重试。'})
         target = ROOT / 'public' / ('index.html' if path == '/' else urllib.parse.unquote(path).lstrip('/'))
@@ -1271,7 +1397,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if len(parts) != 1:
                     raise ValueError('请每次上传一个文件。')
                 return self.send_json(201, store.add_file(parts[0].get_filename(), parts[0].get_payload(decode=True)))
+            if path.startswith('/api/project-documents/') and path.endswith('/upload') and method == 'POST':
+                parts = path.split('/')
+                if len(parts) != 5:
+                    raise ValueError('项目文档位置无效。')
+                length = int(self.headers.get('Content-Length', '0'))
+                content_type = self.headers.get('Content-Type', '')
+                if not 0 < length <= MAX_FILE_BYTES + 65536 or not content_type.startswith('multipart/form-data'):
+                    raise ValueError('请选择一个不超过 20 MB 的文件。')
+                message = BytesParser(policy=email.policy.default).parsebytes(('Content-Type: '+content_type+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+self.rfile.read(length))
+                fields = list(message.iter_parts()) if message.is_multipart() else []
+                uploads = [p for p in fields if p.get_filename()]
+                if len(uploads) != 1:
+                    raise ValueError('请每次选择一个文件。')
+                folder = next((p.get_payload(decode=True).decode('utf-8').strip()
+                               for p in fields if p.get_param('name', header='content-disposition') == 'path'), '')
+                return self.send_json(201, store.add_project_document(parts[3], folder, uploads[0].get_filename(), uploads[0].get_payload(decode=True)))
             data = self.body()
+            if path.startswith('/api/project-documents/'):
+                parts = path.split('/')
+                if len(parts) != 5 or method != 'POST':
+                    raise ValueError('项目文档操作无效。')
+                if parts[4] == 'bind':
+                    p = store.bind_project_folder(parts[3], data.get('path', ''), data.get('create', False))
+                    return self.send_json(200, {'project_id': p['id'], 'folder_path': p['folder_path']})
+                if parts[4] == 'mkdir':
+                    return self.send_json(201, store.create_project_subfolder(parts[3], data.get('path', ''), data.get('name')))
+                if parts[4] == 'open':
+                    return self.send_json(200, store.open_project_document(parts[3], data.get('path', '')))
+                raise ValueError('项目文档操作无效。')
             if path == '/api/categories' and method == 'POST':
                 return self.send_json(201, store.category(data.get('name')))
             if path == '/api/notes' and method == 'POST':

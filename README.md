@@ -10,6 +10,7 @@ Mainline 是一个本地运行的可视化个人秘书：四象限管理、两�
 - **项目**：先按通信组等类别浏览，再查看具体项目的负责人、进度、里程碑和任务；聚餐等活动无需进度。
 - **长期成长**：将长期目标与持续投入放在一起，支持定期回顾、关联任务与首页提醒。
 - **个人笔记**：记录整体反思和每个具体项目的思考；支持搜索、续写、归档和恢复，并为秘书提供有界的相关上下文。
+- **项目文档**：每个具体项目可关联任意可访问的本机文件夹；在项目里浏览文档、创建子文件夹、放入文件，并用电脑默认程序打开常见文档。文档原件留在选定位置。
 - **周与月**：查看会议、约饭、时间块、截止日期和重复安排。
 - **AI 秘书**：自然语言梳理、进度回顾、计划讨论；建议经过选择后才应用。
 - **文件**：读取 Word `.docx`、PPT `.pptx`、PDF、Excel `.xlsx` 和文本，依据文字整理行动。
@@ -19,7 +20,7 @@ Mainline 是一个本地运行的可视化个人秘书：四象限管理、两�
 
 ## Windows 下载安装
 
-**[下载最新版单文件 Mainline.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v4.exe)**（Windows 64 位，2026-10-15 更新版）。下载后将 EXE 放在自己选择的文件夹，双击运行；无需安装 Python，也无需下载源码。它是免安装桌面版，不是 Setup 安装器。首次启动可能稍慢。
+**[下载最新版单文件 Mainline.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v5.exe)**（Windows 64 位，2026-10-15 更新版）。下载后将 EXE 放在自己选择的文件夹，双击运行；无需安装 Python，也无需下载源码。它是免安装桌面版，不是 Setup 安装器。首次启动可能稍慢。
 
 关闭旧版窗口后再运行新版。聊天、日程、任务等记录默认保存在 `%LOCALAPPDATA%\Mainline\data`，更新 EXE 不会重置这些记录，首次运行新版本还会自动备份数据库。模型 API Key 和 Server酱 SendKey **都不包含在下载包中**，请在程序的“偏好与数据”中自行配置。详细步骤、旧网页数据迁移方法和校验值见[Windows EXE 安装说明](Mainline-Desktop/Windows-EXE-安装.md)。
 

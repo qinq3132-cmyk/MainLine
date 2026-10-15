@@ -11,6 +11,7 @@ let state = {tasks:[],projects:[],goals:[],notes:[],files:[],notifications:[],se
 let modelInfo = {models:[],default:''};
 let view = 'home', projectFilter = '', projectArea = '', search = '', showDone = false;
 let notesScope = 'all', showArchivedNotes = false;
+let documentProjectId = '', documentPath = '';
 let overviewMode = localStorage.getItem('desk-overview-mode') || 'week';
 let overviewDate = '', selectedDay = '', aiMode = 'capture', currentJob = null, busyAI = false;
 let pendingPlan = null, expandedProjects = new Set(), refreshing = false, notificationInitialized = false;
@@ -88,7 +89,7 @@ function render() {
   $('#plan-button').hidden=['trash','habits','goals','projects','notes'].includes(view);
   const d=dateObject(state.today);$('#date-label').textContent=`${fmtDate(state.today,true)} · 星期${'日一二三四五六'[d.getDay()]}`;
   $('#page-content').innerHTML=view==='home'?homeView():view==='projects'?projectsView():view==='overview'?overviewView():view==='goals'?goalsView():view==='notes'?notesView():view==='habits'?habitsView():trashView();
-  if(view==='projects')$$('.project-card').forEach(card=>{const id=$('[data-action="edit-project"]',card)?.dataset.id;if(id&&projectKind(project(id))==='project'){const footer=$('.project-card-footer',card),button=document.createElement('button');button.className='inline-link';button.dataset.action='project-notes';button.dataset.id=id;button.textContent='✎ 项目笔记';footer?.append(button);}});
+  if(view==='projects')$$('.project-card').forEach(card=>{const id=$('[data-action="edit-project"]',card)?.dataset.id;if(id&&projectKind(project(id))==='project'){const footer=$('.project-card-footer',card);for(const [action,label] of [['project-notes','✎ 项目笔记'],['project-documents','▤ 项目文档']]){const button=document.createElement('button');button.className='inline-link';button.dataset.action=action;button.dataset.id=id;button.textContent=label;footer?.append(button);}}});
   const unread=state.notifications.filter(n=>!n.read).length;$('#notification-count').textContent=unread;$('#notification-button').setAttribute('aria-label',`提醒与跟进，${unread} 条未读`);
   fillAreaOptions();renderHistory();renderFocus();renderAttachments();
 }
@@ -201,10 +202,48 @@ function openProject(p=null) {
   const source={id:'',name:'',area:projectArea||state.settings?.areas?.[0]||'',project_type:'project',owner:'',color:'#4263eb',goal:'',deadline:'',progress:null,milestones:[],tracks:[],...(p||{})};
   for(const [k,v] of Object.entries(source)){if(form.elements.namedItem(k))form.elements[k].value=v??'';}
   form.elements.milestones_text.value=checklistText(source.milestones);form.elements.tracks_text.value=tracksText(source.tracks);
-  updateProjectFields();$('#project-editor-title').textContent=p?'项目详情':'新建项目';$('#delete-project').hidden=!source.id;openDialog('project-dialog');
+  updateProjectFields();$('#project-editor-title').textContent=p?'项目详情':'新建项目';$('#delete-project').hidden=!source.id;$('#project-documents-button').hidden=!source.id||projectKind(source)!=='project';openDialog('project-dialog');
 }
 function updateProjectFields() {const formal=$('#project-form').elements.project_type.value==='project';$('#project-progress-fields').hidden=!formal;$('#project-milestone-fields').hidden=!formal;$('#project-form').elements.progress.disabled=!formal;}
 $('#project-form').elements.project_type.addEventListener('change',updateProjectFields);
+async function openProjectDocuments(id) {
+  const p=project(id);
+  if(!p||p.deleted_at||projectKind(p)!=='project')return toast('项目不存在，请刷新。',true);
+  if($('#project-dialog').open)closeDialog('project-dialog');
+  documentProjectId=id;documentPath='';$('#project-documents-title').textContent=p.name+' · 项目文档';
+  $('#project-folder-path').value=p.folder_path||'';$('#project-documents-error').textContent='';
+  openDialog('project-documents-dialog');await loadProjectDocuments();
+}
+async function loadProjectDocuments(relative='') {
+  const p=project(documentProjectId),bound=!!p?.folder_path;
+  $('#document-browser').hidden=!bound;
+  $('[data-action="unbind-project-folder"]', $('#project-documents-dialog')).hidden=!bound;
+  if(!bound){$('#document-items').innerHTML='';return;}
+  $('#document-items').innerHTML='';$('#document-more').hidden=true;
+  const listing=await api('/api/project-documents/'+encodeURIComponent(documentProjectId)+'?path='+encodeURIComponent(relative));
+  documentPath=listing.path;$('#project-folder-path').value=listing.root;
+  const parts=documentPath?documentPath.split('/'):[];
+  const crumbs=[`<button class="document-crumb" data-action="document-navigate" data-path="">${esc(p.name)}</button>`];
+  parts.forEach((part,i)=>crumbs.push(`<span aria-hidden="true">›</span><button class="document-crumb" data-action="document-navigate" data-path="${esc(parts.slice(0,i+1).join('/'))}">${esc(part)}</button>`));
+  $('#document-breadcrumb').innerHTML=crumbs.join('');$('#document-current-folder').textContent=parts.at(-1)||'项目根目录';
+  const formatSize=bytes=>bytes<1024?bytes+' B':bytes<1048576?(bytes/1024).toFixed(1)+' KB':(bytes/1048576).toFixed(1)+' MB';
+  $('#document-items').innerHTML=listing.items.map(item=>{const openable=/\.(pdf|docx|pptx|xlsx|txt|md|csv|png|jpe?g|gif|webp)$/i.test(item.name);
+    return `<article class="document-item"><div class="document-item-icon${item.directory?' folder':''}" aria-hidden="true">${item.directory?'▤':'▧'}</div><div class="document-item-copy"><strong title="${esc(item.name)}">${esc(item.name)}</strong><small>${item.directory?'文件夹':formatSize(item.size)} · ${esc(item.modified.slice(0,10))}</small></div>${item.directory?`<button class="inline-link" data-action="document-navigate" data-path="${esc(item.path)}">进入 →</button>`:openable?`<button class="inline-link" data-action="open-project-document" data-path="${esc(item.path)}">打开 ↗</button>`:'<span class="document-item-hint">在资源管理器查看</span>'}</article>`;}).join('')||'<div class="document-empty"><span>▤</span><strong>这个文件夹还没有内容</strong><p>可以新建子文件夹，或把电脑上的文件放进来。</p></div>';
+  $('#document-more').hidden=!listing.truncated;
+}
+async function uploadProjectDocuments(files) {
+  if(!files.length)return;
+  if([...files].some(file=>file.size>20_000_000))throw new Error('每个文件需在 20 MB 以内。');
+  let added=0;
+  try{
+    for(const file of files){
+      const body=new FormData();body.append('path',documentPath);body.append('file',file);
+      const response=await fetch('/api/project-documents/'+encodeURIComponent(documentProjectId)+'/upload',{method:'POST',headers:{'X-Personal-Desk':'1'},body});
+      const result=await response.json();if(!response.ok)throw new Error(result.error||'文件未能放入项目文件夹。');added++;
+    }
+    toast(`已放入 ${added} 个文件。`);
+  }finally{await loadProjectDocuments(documentPath);}
+}
 async function openSettings() {
   const form=$('#settings-form');$('#settings-error').textContent='';
   for(const [k,v] of Object.entries(state.settings)){const f=form.elements.namedItem(k);if(!f)continue;if(f.type==='checkbox')f.checked=!!v;else f.value=v;}
@@ -336,6 +375,32 @@ async function finishFocus() {
 async function action(name, button) {
   const id=button?.dataset.id;
   const extension = await extendedAction(name, button);if(extension) return;
+  if(name==='project-documents')return openProjectDocuments(id);
+  if(name==='project-documents-from-editor')return openProjectDocuments($('#project-form').elements.id.value);
+  if(name==='choose-project-folder'){
+    if(!window.pywebview?.api?.choose_folder)return toast('网页模式请直接填写文件夹的完整路径。',true);
+    const chosen=await window.pywebview.api.choose_folder();if(chosen)$('#project-folder-path').value=chosen;return;
+  }
+  if(name==='bind-project-folder'||name==='create-project-root'){
+    const path=$('#project-folder-path').value.trim();if(!path)return toast('请先选择或填写文件夹位置。',true);
+    await api('/api/project-documents/'+encodeURIComponent(documentProjectId)+'/bind','POST',{path,create:name==='create-project-root'});
+    await refresh();documentPath='';await loadProjectDocuments();return toast(name==='create-project-root'?'文件夹已创建并关联。':'项目文件夹已关联。');
+  }
+  if(name==='unbind-project-folder'){
+    await api('/api/project-documents/'+encodeURIComponent(documentProjectId)+'/bind','POST',{path:''});
+    await refresh();documentPath='';$('#project-folder-path').value='';await loadProjectDocuments();return toast('已解除关联，电脑上的文件没有删除。');
+  }
+  if(name==='document-navigate')return loadProjectDocuments(button.dataset.path||'');
+  if(name==='show-create-subfolder'){$('#document-create-row').hidden=false;$('#document-new-folder-name').focus();return;}
+  if(name==='cancel-create-subfolder'){$('#document-create-row').hidden=true;$('#document-new-folder-name').value='';return;}
+  if(name==='create-project-subfolder'){
+    const input=$('#document-new-folder-name');await api('/api/project-documents/'+encodeURIComponent(documentProjectId)+'/mkdir','POST',{path:documentPath,name:input.value});
+    input.value='';$('#document-create-row').hidden=true;await loadProjectDocuments(documentPath);return toast('文件夹已创建。');
+  }
+  if(name==='document-upload')return $('#project-document-upload').click();
+  if(name==='open-project-folder'||name==='open-project-document'){
+    await api('/api/project-documents/'+encodeURIComponent(documentProjectId)+'/open','POST',{path:name==='open-project-folder'?documentPath:button.dataset.path});return;
+  }
   if(name==='new-note')return openNote(null,notesScope==='all'?'':notesScope);
   if(name==='edit-note')return openNote((state.notes||[]).find(n=>n.id===id));
   if(name==='project-notes'){notesScope=id;view='notes';location.hash='notes/'+encodeURIComponent(id);return render();}
@@ -420,12 +485,13 @@ document.addEventListener('click',async event=>{
   const nav=event.target.closest('[data-nav]');if(nav){navigate(nav.dataset.nav);return;}
   const mode=event.target.closest('.assistant-modes [data-mode]');if(mode){setAiMode(mode.dataset.mode);return;}
   const button=event.target.closest('[data-action]');if(!button)return;
-  try{await action(button.dataset.action,button);}catch(e){toast(e.message,true);if($('#task-dialog').open)$('#task-error').textContent=e.message;if($('#settings-dialog').open)$('#settings-error').textContent=e.message;if($('#project-dialog').open)$('#project-error').textContent=e.message;if($('#note-dialog').open)$('#note-error').textContent=e.message;}
+  try{await action(button.dataset.action,button);}catch(e){toast(e.message,true);if($('#task-dialog').open)$('#task-error').textContent=e.message;if($('#settings-dialog').open)$('#settings-error').textContent=e.message;if($('#project-dialog').open)$('#project-error').textContent=e.message;if($('#note-dialog').open)$('#note-error').textContent=e.message;if($('#project-documents-dialog').open)$('#project-documents-error').textContent=e.message;}
 });
 document.addEventListener('change',async event=>{
   const el=event.target;
   try{
     if(['word-upload','ppt-upload','other-upload'].includes(el.id)){await uploadFiles(el.files);el.value='';}
+    else if(el.id==='project-document-upload'){try{await uploadProjectDocuments(el.files);}finally{el.value='';}}
     else if(el.name==='review_days'&&el.form?.id==='goal-form'){el.form.elements.next_review.value=addDays(state.today,Number(el.value));}
     else if(el.hasAttribute('data-file-select')){el.checked?attachedFiles.add(el.dataset.fileSelect):attachedFiles.delete(el.dataset.fileSelect);renderAttachments();}
     else if(el.hasAttribute('data-complete')){el.disabled=true;await api('/api/tasks/'+el.dataset.complete,'PATCH',{status:el.checked?'done':'todo'});await refresh();toast(el.checked?'已完成。重复事项已安排下一次。':'已恢复为待办。');}
