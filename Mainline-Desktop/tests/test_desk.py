@@ -33,6 +33,30 @@ class StoreTests(unittest.TestCase):
     def task(self, **kw):
         return self.store.task({'title': '实验方案', 'project_id': self.pid, **kw})
 
+    def test_notes_preserve_global_and_project_reflections_across_backup_and_legacy_import(self):
+        p = self.store.project({'name': '示例研究项目', 'area': '通信组'})
+        global_note = self.store.note({'title': '整体反思', 'content': '留出时间做长期判断。'})
+        project_note = self.store.note({'title': '项目判断', 'content': '先验证波形生成方案。', 'project_id': p['id']})
+        self.assertEqual(self.store.note({'content': '先验证两个方案。'}, project_note['id'])['created_at'], project_note['created_at'])
+        with self.assertRaises(ValueError):
+            self.store.note({'title': '错误归属', 'content': '内容', 'project_id': self.pid})
+        backup = self.store.export()
+        self.assertEqual(len(backup['notes']), 2)
+        self.store.restore(backup)
+        self.assertEqual(len(server.Store(self.temp.name).state()['notes']), 2)
+        old_backup = copy.deepcopy(backup)
+        del old_backup['notes']
+        self.store.restore(old_backup)
+        self.assertEqual({n['id'] for n in self.store.all('notes')}, {global_note['id'], project_note['id']})
+        archived = self.store.put('notes', {**global_note, 'deleted_at': server.stamp()})
+        self.assertTrue(archived['deleted_at'])
+        assistant = server.Assistant(self.store, FakeModels())
+        try:
+            self.assertNotIn('整体反思', json.dumps(assistant.context('整体反思'), ensure_ascii=False))
+            self.assertIn('项目判断', json.dumps(assistant.context('项目判断'), ensure_ascii=False))
+        finally:
+            assistant.pool.shutdown(wait=False, cancel_futures=True)
+
     def test_two_level_projects_preserve_category_links_owner_and_activity(self):
         category = self.store.all('projects')[0]
         self.assertEqual(self.store.category(category['area'])['id'], category['id'])
@@ -211,6 +235,18 @@ class ApiTests(unittest.TestCase):
     def test_health_is_safe_and_model_endpoint_contains_no_key_fields(self):
         health=self.request('/api/health');self.assertEqual(health['app'],'personal-desk')
         self.assertNotIn('key',self.request('/api/models'))
+
+    def test_note_api_creates_edits_archives_and_restores_without_losing_content(self):
+        p=self.request('/api/projects','POST',{'name':'示例研究项目','area':'通信组'})
+        note=self.request('/api/notes','POST',{'title':'一次思考','content':'第一版判断','project_id':p['id']})
+        self.assertEqual(self.request('/api/state')['notes'][0]['id'],note['id'])
+        updated=self.request('/api/notes/'+note['id'],'PATCH',{'content':'修订后的判断'})
+        self.assertEqual(updated['content'],'修订后的判断')
+        self.request('/api/notes/'+note['id'],'DELETE',{})
+        self.assertTrue(self.store.get('notes',note['id'])['deleted_at'])
+        self.request('/api/notes/'+note['id'],'PATCH',{'restore':True})
+        self.assertEqual(self.store.get('notes',note['id'])['content'],'修订后的判断')
+        self.assertFalse(self.store.get('notes',note['id'])['deleted_at'])
 
     def test_category_api_is_idempotent_and_prevents_deleting_parent_with_projects(self):
         category = self.request('/api/categories', 'POST', {'name': '新研究组'})

@@ -7,9 +7,10 @@ const kindNames = {task:'推进任务', deep:'深度思考', habit:'长期投入
 const repeatNames = {none:'不重复', daily:'每天', weekdays:'工作日', weekly:'每周', monthly:'每月'};
 const quadNames = ['重要且紧急','重要不紧急','不重要但紧急','不重要不紧急'];
 const quadHints = ['及时处理，解除当前阻塞','保护时间，让长期目标向前','委派协作，保留检查节点','暂存想法，有余力时再看'];
-let state = {tasks:[],projects:[],goals:[],files:[],notifications:[],settings:{},messages:[],focus:[],today:''};
+let state = {tasks:[],projects:[],goals:[],notes:[],files:[],notifications:[],settings:{},messages:[],focus:[],today:''};
 let modelInfo = {models:[],default:''};
 let view = 'home', projectFilter = '', projectArea = '', search = '', showDone = false;
+let notesScope = 'all', showArchivedNotes = false;
 let overviewMode = localStorage.getItem('desk-overview-mode') || 'week';
 let overviewDate = '', selectedDay = '', aiMode = 'capture', currentJob = null, busyAI = false;
 let pendingPlan = null, expandedProjects = new Set(), refreshing = false, notificationInitialized = false;
@@ -79,11 +80,15 @@ function renderNavigation() {
 }
 function render() {
   renderNavigation();
-  $('#project-filter').hidden=['goals','projects'].includes(view);$('#show-done').closest('label').hidden=view==='goals'||(view==='projects'&&!projectArea);
-  $('#page-title').textContent={home:'四象限',projects:'项目',overview:'周与月',goals:'长期成长',habits:'长期成长',trash:'回收站'}[view];
-  $('#plan-button').hidden=['trash','habits','goals','projects'].includes(view);
+  $('#project-filter').hidden=['goals','projects','notes'].includes(view);$('#show-done').closest('label').hidden=['goals','notes'].includes(view)||(view==='projects'&&!projectArea);
+  $('#page-title').textContent={home:'四象限',projects:'项目',overview:'周与月',goals:'长期成长',notes:'个人笔记',habits:'长期成长',trash:'回收站'}[view];
+  $('#page-eyebrow').textContent=view==='notes'?'YOUR THINKING, KEPT CLOSE':'YOUR ATTENTION, WELL PLACED';
+  $('#page-description').textContent=view==='notes'?'把反思与项目判断留在这里，慢慢形成自己的脉络。':'科研、创业和生活，放在同一张全景里。';
+  $('#task-search').placeholder=view==='notes'?'搜索笔记':'搜索';
+  $('#plan-button').hidden=['trash','habits','goals','projects','notes'].includes(view);
   const d=dateObject(state.today);$('#date-label').textContent=`${fmtDate(state.today,true)} · 星期${'日一二三四五六'[d.getDay()]}`;
-  $('#page-content').innerHTML=view==='home'?homeView():view==='projects'?projectsView():view==='overview'?overviewView():view==='goals'?goalsView():view==='habits'?habitsView():trashView();
+  $('#page-content').innerHTML=view==='home'?homeView():view==='projects'?projectsView():view==='overview'?overviewView():view==='goals'?goalsView():view==='notes'?notesView():view==='habits'?habitsView():trashView();
+  if(view==='projects')$$('.project-card').forEach(card=>{const id=$('[data-action="edit-project"]',card)?.dataset.id;if(id&&projectKind(project(id))==='project'){const footer=$('.project-card-footer',card),button=document.createElement('button');button.className='inline-link';button.dataset.action='project-notes';button.dataset.id=id;button.textContent='✎ 项目笔记';footer?.append(button);}});
   const unread=state.notifications.filter(n=>!n.read).length;$('#notification-count').textContent=unread;$('#notification-button').setAttribute('aria-label',`提醒与跟进，${unread} 条未读`);
   fillAreaOptions();renderHistory();renderFocus();renderAttachments();
 }
@@ -287,8 +292,33 @@ async function refresh() {
   finally{refreshing=false;}
 }
 function openCategory(area) {projectArea=area;view='projects';location.hash='projects/'+encodeURIComponent(area);render();}
-function readRoute() {const hash=location.hash.slice(1);if(hash.startsWith('projects/')){try{projectArea=decodeURIComponent(hash.slice(9));}catch{projectArea='';}view='projects';}else{view=['home','projects','overview','goals','trash'].includes(hash)?hash:hash==='habits'?'goals':'home';if(view==='projects')projectArea='';}}
-function navigate(next) {if(next==='projects')projectArea='';if(next==='habits')next='goals';view=['home','projects','overview','goals','habits','trash'].includes(next)?next:'home';location.hash=view;render();}
+function readRoute() {const hash=location.hash.slice(1);if(hash.startsWith('projects/')){try{projectArea=decodeURIComponent(hash.slice(9));}catch{projectArea='';}view='projects';}else if(hash.startsWith('notes/')){notesScope=decodeURIComponent(hash.slice(6));view='notes';}else{view=['home','projects','overview','goals','notes','trash'].includes(hash)?hash:hash==='habits'?'goals':'home';if(view==='projects')projectArea='';if(view==='notes')notesScope='all';}}
+function navigate(next) {if(next==='projects')projectArea='';if(next==='notes')notesScope='all';if(next==='habits')next='goals';view=['home','projects','overview','goals','notes','habits','trash'].includes(next)?next:'home';location.hash=view;render();}
+function notesView() {
+  const all=state.notes||[],projects=state.projects.filter(p=>projectKind(p)==='project'&&(!p.deleted_at||all.some(n=>n.project_id===p.id&&!n.deleted_at)));
+  const active=all.filter(n=>!n.deleted_at),archived=all.filter(n=>n.deleted_at);
+  const selected=project(notesScope),scopeTitle=notesScope==='all'?'所有笔记':notesScope===''?'整体笔记':selected?.name||'原项目笔记';
+  const matching=n=>(notesScope==='all'||n.project_id===notesScope)&&(!search||[n.title,n.content,project(n.project_id)?.name].some(v=>String(v||'').toLowerCase().includes(search.toLowerCase())));
+  const visible=active.filter(matching).sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
+  const archivedVisible=showArchivedNotes?archived.filter(matching).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)):[];
+  const count=id=>active.filter(n=>n.project_id===id).length;
+  const scopeButton=(id,label,countValue,icon)=>`<button class="note-scope${notesScope===id?' selected':''}" data-action="notes-scope" data-scope="${esc(id)}"><span class="note-scope-icon">${icon}</span><span class="note-scope-name">${esc(label)}</span><small>${countValue}</small></button>`;
+  const rail=`<aside class="note-rail" aria-label="笔记归属"><div class="note-rail-caption">笔记索引</div>${scopeButton('all','所有笔记',active.length,'◫')}${scopeButton('','整体笔记',count(''),'◈')}<div class="note-rail-caption spaced">项目笔记</div>${projects.map(p=>scopeButton(p.id,p.name,count(p.id),'◇')).join('')||'<p class="note-rail-empty">创建项目后，可以为它单独记录思考。</p>'}</aside>`;
+  const noteCard=(n,isArchived=false)=>{const p=project(n.project_id),tag=p?.name||(n.project_id?'原项目':'整体思考');return `<article class="note-card${isArchived?' is-archived':''}"><div class="note-card-top"><span class="note-tag">${esc(tag)}</span><time datetime="${esc(n.updated_at)}">${fmtDate(n.updated_at.slice(0,10),true)}</time></div><h3>${esc(n.title)}</h3><p>${esc(n.content.slice(0,260))}${n.content.length>260?'…':''}</p><div class="note-card-bottom"><span>${n.content.length} 字 · ${isArchived?'已归档':'本机保存'}</span>${isArchived?`<button class="inline-link" data-action="restore-note" data-id="${esc(n.id)}">恢复笔记 ↗</button>`:`<button class="inline-link" data-action="edit-note" data-id="${esc(n.id)}">继续思考 ↗</button>`}</div></article>`;};
+  const hero=`<div class="note-hero"><div class="note-hero-copy"><div class="note-hero-kicker">THOUGHTS IN PROGRESS</div><h2>给思考一个<br>安静的地方。</h2><p>记录当下的观察、项目的转折和还没想明白的问题。它们会逐渐连成你的判断脉络。</p><button class="note-hero-button" data-action="new-note">＋ 写一篇笔记 <span>↗</span></button></div><div class="note-hero-art" aria-hidden="true"><div class="note-paper paper-back"></div><div class="note-paper paper-front"><span>◌</span><i></i><i></i><i></i><i></i><b>✦</b></div></div></div>`;
+  return `<div class="notes-page">${hero}<div class="note-workspace">${rail}<section class="note-main"><div class="note-list-heading"><div><div class="note-kicker">${esc(notesScope==='all'?'YOUR COLLECTION':notesScope===''?'THE BIG PICTURE':'PROJECT JOURNAL')}</div><h2>${esc(scopeTitle)}</h2><p>${visible.length} 篇笔记 · 按最近修改排列</p></div><button class="quiet-button" data-action="new-note">＋ 新建</button></div>${visible.length?`<div class="note-grid">${visible.map(n=>noteCard(n)).join('')}</div>`:`<div class="note-empty"><span>✎</span><h3>${search?'没有找到相关笔记':'从第一篇开始'}</h3><p>${search?'试试其他关键词。':'写下此刻的观察。想法不必完整，之后还可以继续修改。'}</p><button class="primary-button" data-action="new-note">写一篇笔记</button></div>`}<div class="note-archive-toggle"><button class="inline-link" data-action="toggle-archived-notes">${showArchivedNotes?'收起':'查看'}归档笔记 · ${archived.filter(matching).length}</button></div>${archivedVisible.length?`<div class="note-grid archived-grid">${archivedVisible.map(n=>noteCard(n,true)).join('')}</div>`:''}</section></div></div>`;
+}
+function openNote(note=null,projectId='') {
+  if(note===undefined)return toast('笔记不存在，请刷新。',true);
+  const form=$('#note-form');form.reset();$('#note-error').textContent='';
+  const projects=state.projects.filter(p=>projectKind(p)==='project'&&(!p.deleted_at||p.id===note?.project_id));
+  $('#note-project').innerHTML='<option value="">整体笔记</option>'+projects.map(p=>`<option value="${esc(p.id)}">${esc(p.area)} / ${esc(p.name)}</option>`).join('');
+  form.elements.id.value=note?.id||'';form.elements.title.value=note?.title||'';form.elements.content.value=note?.content||'';
+  form.elements.project_id.value=note?.project_id||projectId||'';
+  if(form.elements.project_id.value!==String(note?.project_id||projectId||''))form.elements.project_id.value='';
+  $('#note-editor-title').textContent=note?'继续写这篇笔记':'写一篇笔记';$('#note-archive').hidden=!note;openDialog('note-dialog');
+  form.elements.title.focus();
+}
 function readFocus() {try{return JSON.parse(localStorage.getItem('desk-focus')||'null');}catch{return null;}}
 function persistFocus() {if(focusSession)localStorage.setItem('desk-focus',JSON.stringify(focusSession));else localStorage.removeItem('desk-focus');}
 function focusElapsed() {if(!focusSession)return 0;return focusSession.elapsed+(focusSession.running?Math.max(0,Date.now()-focusSession.resumedAt):0);}
@@ -306,6 +336,17 @@ async function finishFocus() {
 async function action(name, button) {
   const id=button?.dataset.id;
   const extension = await extendedAction(name, button);if(extension) return;
+  if(name==='new-note')return openNote(null,notesScope==='all'?'':notesScope);
+  if(name==='edit-note')return openNote((state.notes||[]).find(n=>n.id===id));
+  if(name==='project-notes'){notesScope=id;view='notes';location.hash='notes/'+encodeURIComponent(id);return render();}
+  if(name==='notes-scope'){notesScope=button.dataset.scope;view='notes';location.hash=notesScope==='all'?'notes':'notes/'+encodeURIComponent(notesScope);return render();}
+  if(name==='toggle-archived-notes'){showArchivedNotes=!showArchivedNotes;return render();}
+  if(name==='archive-note'){
+    const noteId=$('#note-form').elements.id.value;if(!noteId)return;
+    if(!confirm('将这篇笔记归档？内容会保留，可随时恢复。'))return;
+    await api('/api/notes/'+noteId,'DELETE',{});closeDialog('note-dialog');await refresh();return toast('笔记已归档，可以在归档中恢复。');
+  }
+  if(name==='restore-note'){await api('/api/notes/'+id,'PATCH',{restore:true});await refresh();return toast('笔记已恢复。');}
   if(name==='new-task')return openTask();
   if(name==='new-project')return openProject();
   if(name==='new-category'){$('#category-form').reset();$('#category-error').textContent='';return openDialog('category-dialog');}
@@ -379,7 +420,7 @@ document.addEventListener('click',async event=>{
   const nav=event.target.closest('[data-nav]');if(nav){navigate(nav.dataset.nav);return;}
   const mode=event.target.closest('.assistant-modes [data-mode]');if(mode){setAiMode(mode.dataset.mode);return;}
   const button=event.target.closest('[data-action]');if(!button)return;
-  try{await action(button.dataset.action,button);}catch(e){toast(e.message,true);if($('#task-dialog').open)$('#task-error').textContent=e.message;if($('#settings-dialog').open)$('#settings-error').textContent=e.message;if($('#project-dialog').open)$('#project-error').textContent=e.message;}
+  try{await action(button.dataset.action,button);}catch(e){toast(e.message,true);if($('#task-dialog').open)$('#task-error').textContent=e.message;if($('#settings-dialog').open)$('#settings-error').textContent=e.message;if($('#project-dialog').open)$('#project-error').textContent=e.message;if($('#note-dialog').open)$('#note-error').textContent=e.message;}
 });
 document.addEventListener('change',async event=>{
   const el=event.target;
@@ -404,6 +445,7 @@ document.addEventListener('change',async event=>{
 let searchTimer;$('#task-search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{search=e.target.value.trim();render();},150);});
 $('#task-form').addEventListener('submit',async e=>{e.preventDefault();const submit=$('button[type=submit]',e.target);submit.disabled=true;$('#task-error').textContent='';try{await saveTask();}catch(error){$('#task-error').textContent=error.message;}finally{submit.disabled=false;}});
 $('#project-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.target,data=Object.fromEntries(new FormData(form)),id=data.id;delete data.id;if(data.progress!==undefined)data.progress=data.progress.trim()===''?null:Number(data.progress);data.milestones=parseChecklist(data.milestones_text);delete data.milestones_text;data.tracks=parseTracks(data.tracks_text);delete data.tracks_text;const submit=$('button[type=submit]',form);submit.disabled=true;try{await api(id?'/api/projects/'+id:'/api/projects',id?'PATCH':'POST',data);closeDialog('project-dialog');await refresh();toast('项目已保存。');}catch(error){$('#project-error').textContent=error.message;}finally{submit.disabled=false;}});
+$('#note-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.target,data=Object.fromEntries(new FormData(form)),id=data.id;delete data.id;const button=$('button[type=submit]',form);button.disabled=true;$('#note-error').textContent='';try{await api(id?'/api/notes/'+id:'/api/notes',id?'PATCH':'POST',data);closeDialog('note-dialog');await refresh();toast('笔记已保存。');}catch(error){$('#note-error').textContent=error.message;}finally{button.disabled=false;}});
 $('#settings-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.target,data=Object.fromEntries(new FormData(form));data.review_enabled=form.elements.review_enabled.checked;data.workdays=$$('input[name=workday]:checked',form).map(c=>Number(c.value));delete data.workday;data.capacity=Number(data.capacity);data.buffer_minutes=Number(data.buffer_minutes);data.reminder_minutes=Number(data.reminder_minutes);try{await api('/api/settings','POST',data);closeDialog('settings-dialog');await refresh();toast('时间与跟进偏好已保存。');}catch(error){$('#settings-error').textContent=error.message;}});
 let dragId='';
 document.addEventListener('dragstart',e=>{const item=e.target.closest('[data-task]');if(!item)return;dragId=item.dataset.task;e.dataTransfer.setData('text/plain',dragId);e.dataTransfer.effectAllowed='move';});

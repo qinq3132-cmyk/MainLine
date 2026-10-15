@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#4263eb">
   <title>主线 · Mainline</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/refined.css">
+  <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/refined.css"><link rel="stylesheet" href="/notes.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -19,6 +19,7 @@
       <button class="nav-item" data-nav="projects"><span aria-hidden="true">▧</span>项目</button>
       <button class="nav-item" data-nav="overview"><span aria-hidden="true">▦</span>周与月</button>
       <button class="nav-item" data-nav="goals"><span aria-hidden="true">◎</span>长期成长</button>
+      <button class="nav-item" data-nav="notes"><span aria-hidden="true">✎</span>个人笔记</button>
       <button class="nav-item" data-nav="trash"><span aria-hidden="true">↶</span>回收站</button>
     </nav>
     <div class="sidebar-label">类别与项目<button class="icon-button" data-action="new-category" aria-label="添加类别">＋</button></div>
@@ -59,6 +60,15 @@
     <label class="field">子任务 · 每行一项<textarea name="checklist_text" rows="3" placeholder="[ ] 确定方案&#10;[x] 收集已有结果"></textarea></label>
     <div class="form-error" id="task-error" role="alert"></div>
     <footer class="dialog-footer"><div><button type="button" class="danger-button" data-action="archive-task" id="archive-task" hidden>移入回收站</button><button type="button" class="quiet-button" data-action="start-focus" id="start-focus" hidden>开始专注</button></div><button class="primary-button" type="submit">保存事项</button></footer>
+  </form>
+</dialog>
+<dialog id="note-dialog" class="editor-dialog note-editor">
+  <form id="note-form"><div class="dialog-heading"><div><div class="eyebrow">A PLACE TO THINK</div><h2 id="note-editor-title">写一篇笔记</h2></div><button type="button" class="icon-button" data-close="note-dialog" aria-label="关闭">×</button></div>
+    <input type="hidden" name="id"><label class="field">笔记标题<input name="title" required maxlength="160" placeholder="给这次思考起个名字"></label>
+    <label class="field">归属<select name="project_id" id="note-project"><option value="">整体笔记</option></select></label>
+    <label class="field">正文<textarea name="content" required maxlength="30000" rows="12" placeholder="写下观察、判断、尚未想清楚的问题，以及下一步想验证什么……"></textarea></label>
+    <p class="help-text">保存在本机。使用秘书时，相关笔记的节选会随请求发送给你选择的模型服务商。</p>
+    <div id="note-error" class="form-error" role="alert"></div><footer class="dialog-footer"><button type="button" class="quiet-button" id="note-archive" data-action="archive-note" hidden>归档笔记</button><span></span><button type="submit" class="primary-button">保存笔记</button></footer>
   </form>
 </dialog>
 <dialog id="goal-dialog" class="editor-dialog">

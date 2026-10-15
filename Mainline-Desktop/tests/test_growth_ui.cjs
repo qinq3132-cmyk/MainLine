@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../public/app.js'), 'utf8');
 const context = vm.createContext({
-  state: {today:'2026-10-15', projects:[], goals:[], tasks:[],settings:{areas:[]}}, search:'', projectFilter:'',projectArea:'',showDone:false,expandedProjects:new Set(),
+  state: {today:'2026-10-15', projects:[], goals:[], notes:[], tasks:[],settings:{areas:[]}}, search:'', projectFilter:'',projectArea:'',notesScope:'all',showArchivedNotes:false,showDone:false,expandedProjects:new Set(),
   esc:v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
   hours:v=>v+'分钟', repeatNames:{weekly:'每周',daily:'每天',none:'不重复'},
   fmtDate:v=>v, dateObject:v=>new Date(v+'T12:00:00'), color:()=> '#4263eb', taskCard:t=>`<div class="test-task">${t.title}</div>`,
@@ -17,6 +17,7 @@ vm.runInContext(`
   ${source.slice(source.indexOf('function projectKind('),source.indexOf('function overviewView('))}
   ${source.slice(source.indexOf('function projectProgress('),source.indexOf('function trashView('))}
   ${source.slice(source.indexOf('function goalsView('),source.indexOf('function openGoal('))}
+  ${source.slice(source.indexOf('function notesView('),source.indexOf('function readFocus('))}
 `, context);
 const render = expression => vm.runInContext(expression, context);
 assert.match(render("projectProgress({id:'old',name:'旧项目'})"), /未评估/);
@@ -74,4 +75,17 @@ context.state.goals[0].deleted_at = '2026-10-15';
 html = render('goalsView()');
 assert.match(html, /<h3>阅读积累<\/h3>/, 'Habits linked to a missing goal remain visible as independent investments.');
 assert.doesNotMatch(html, /class="goal-card/);
+context.state.projects=[{id:'p',name:'示例研究项目',area:'通信组',project_type:'project'}];
+context.state.notes=[
+  {id:'n1',title:'整体反思',content:'需要保护思考时间',project_id:'',created_at:'2026-10-15T10:00:00',updated_at:'2026-10-15T10:00:00',deleted_at:''},
+  {id:'n2',title:'方案判断',content:'先验证可行性',project_id:'p',created_at:'2026-10-15T11:00:00',updated_at:'2026-10-15T11:00:00',deleted_at:''},
+];
+context.notesScope='all';context.search='';
+assert.match(render('notesView()'), /整体反思/);
+assert.match(render('notesView()'), /方案判断/);
+context.notesScope='p';
+assert.match(render('notesView()'), /方案判断/);
+assert.doesNotMatch(render('notesView()'), /<h3>整体反思<\/h3>/);
+context.state.notes[1].deleted_at='2026-10-15T12:00:00';
+assert.doesNotMatch(render('notesView()'), /<h3>方案判断<\/h3>/);
 console.log('Growth UI rendering checks passed.');
