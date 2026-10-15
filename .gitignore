@@ -1,5 +1,7 @@
 **/data/
 **/backups/
+**/attachments/
+**/exports/
 .opencode/
 .codex/
 .agents/
@@ -8,7 +10,13 @@
 *.pyc
 *.sqlite3
 *.sqlite3-*
+*.sqlite
+*.sqlite-*
 *.db
+*.db-*
+*.jsonl
+*backup*.json
+*export*.json
 *.pem
 *.p12
 *.pfx
