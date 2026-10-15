@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../public/app.js'), 'utf8');
 const context = vm.createContext({
-  state: {today:'2026-10-15', projects:[], goals:[], notes:[], tasks:[],settings:{areas:[]}}, search:'', projectFilter:'',projectArea:'',notesScope:'all',showArchivedNotes:false,showDone:false,expandedProjects:new Set(),
+  state: {today:'2026-10-15', projects:[], goals:[], notes:[], tasks:[],settings:{areas:[]}}, search:'', projectFilter:'',projectArea:'',selectedProjectId:'',notesScope:'all',showArchivedNotes:false,showDone:false,expandedProjects:new Set(),
   esc:v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),
   hours:v=>v+'分钟', repeatNames:{weekly:'每周',daily:'每天',none:'不重复'},
   fmtDate:v=>v, dateObject:v=>new Date(v+'T12:00:00'), color:()=> '#4263eb', taskCard:t=>`<div class="test-task">${t.title}</div>`,
@@ -13,6 +13,8 @@ const context = vm.createContext({
 vm.runInContext(`
   function project(id){return state.projects.find(p=>p.id===id);}
   function activeTasks(){return state.tasks.filter(t=>!t.deleted_at);}
+  function visibleTasks(){return activeTasks().filter(t=>(showDone||t.status!=='done')&&(!projectFilter||t.project_id===projectFilter));}
+  ${source.slice(source.indexOf('function homeTasks()'),source.indexOf('function qIndex('))}
   function addDays(day,n){const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
   ${source.slice(source.indexOf('function projectKind('),source.indexOf('function overviewView('))}
   ${source.slice(source.indexOf('function projectProgress('),source.indexOf('function trashView('))}
@@ -43,11 +45,29 @@ assert.match(inside, /示例研究项目/);
 assert.match(inside, /项目负责人/);
 assert.match(inside, /aria-valuenow="40"/);
 assert.match(inside, /预订餐厅/);
+context.selectedProjectId='p';
+let detail=render('projectsView()');
+assert.match(detail,/编辑项目与进度/);
+assert.match(detail,/示例研究项目/);
+assert.doesNotMatch(detail,/预订餐厅/);
+context.selectedProjectId='';
 assert.doesNotMatch(render("projectCards([state.projects[2]])"), /progressbar|50%/);
 context.search='项目负责人';context.projectArea='';
 assert.match(render('projectsView()'), /通信组/);
 assert.doesNotMatch(render('projectsView()'), /生活与关系/);
 context.search='';context.state.projects=[];context.state.tasks=[];
+
+context.state.tasks=[
+  {id:'repeat-done',repeat:'daily',status:'done',occurrence:'2026-10-15'},
+  {id:'repeat-future',repeat:'daily',status:'todo',occurrence:'2026-10-16'},
+  {id:'repeat-today',repeat:'daily',status:'todo',occurrence:'2026-10-15'},
+  {id:'repeat-overdue',repeat:'weekly',status:'todo',deadline:'2026-10-14'},
+  {id:'long-project',repeat:'none',status:'todo',deadline:'2026-12-01'},
+];
+context.showDone=true;
+assert.deepEqual(Array.from(render('homeTasks().map(t=>t.id)')),['repeat-today','repeat-overdue','long-project']);
+context.showDone=false;
+context.state.tasks=[];
 
 context.state.goals = [{id:'g',title:'研究方向',status:'active',next_review:'2026-10-22'}];
 context.state.tasks = [

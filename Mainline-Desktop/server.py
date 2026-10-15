@@ -546,8 +546,8 @@ class Store:
             if conflict:
                 raise ValueError('该时间与已有安排冲突：' + '、'.join(conflict[:3]))
             if task['status'] == 'done' and (not old or old['status'] != 'done'):
-                if task['kind'] == 'habit' and task.get('occurrence') and task['occurrence'] > now().date().isoformat():
-                    raise ValueError('下一次长期投入尚未到期，请到当天再记录完成。')
+                if task['repeat'] != 'none' and task.get('occurrence') and task['occurrence'] > now().date().isoformat():
+                    raise ValueError('下一次周期事项尚未到期，请到当天再记录完成。')
                 task['completed_at'] = stamp()
                 # The recurring clone and completion are committed together. A repeated
                 # completion or undo/re-complete cannot create duplicate occurrences.
@@ -580,7 +580,7 @@ class Store:
                 task['completed_at'] = ''
             return self.put('tasks', task)
 
-    def project(self, data, item_id=None):
+    def project_record(self, data, item_id=None):
         old = self.get('projects', item_id) if item_id else {}
         if item_id and not old:
             raise ValueError('项目不存在。')
@@ -624,7 +624,37 @@ class Store:
         p['tracks'] = clean_tracks
         p.setdefault('created_at', stamp())
         p.setdefault('deleted_at', '')
-        return self.put('projects', p)
+        return p
+
+    def project(self, data, item_id=None):
+        return self.put('projects', self.project_record(data, item_id))
+
+    def promote_task_to_project(self, task_id, data):
+        """Create a second-level project and relink an entire repeat series atomically."""
+        with self.lock:
+            source = self.get('tasks', task_id)
+            if not source or source.get('deleted_at'):
+                raise ValueError('事项不存在或已归档。')
+            current = self.get('projects', source.get('project_id')) if source.get('project_id') else None
+            if not current or current.get('deleted_at'):
+                raise ValueError('请先将事项归入一个类别或项目。')
+            area = current.get('area') or current.get('name')
+            if data.get('area') != area or data.get('project_type') != 'project':
+                raise ValueError('独立项目须保留在原一级类别下。')
+            record = self.project_record(data)
+            root = source.get('repeat_parent') or source['id']
+            linked = [task for task in self.all('tasks')
+                      if task.get('project_id') == source['project_id']
+                      and (task['id'] == root or task.get('repeat_parent') == root)] if source.get('repeat') != 'none' else [source]
+            if not linked:
+                raise ValueError('未找到要归入项目的事项。')
+            timestamp = stamp()
+            with self.connect() as db:
+                db.execute('INSERT INTO projects VALUES(?,?)', (record['id'], json.dumps(record, ensure_ascii=False)))
+                for task in linked:
+                    moved = {**task, 'project_id': record['id'], 'updated_at': timestamp}
+                    db.execute('UPDATE tasks SET data=? WHERE id=?', (json.dumps(moved, ensure_ascii=False), task['id']))
+            return {'project': record, 'moved_count': len(linked)}
 
     def project_folder(self, project_id):
         p = self.get('projects', project_id)
@@ -1475,6 +1505,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send_json(200, store.file_public(store.put('files', {**record, 'deleted_at': stamp()})))
             if path == '/api/tasks' and method == 'POST':
                 return self.send_json(201, store.task(data))
+            if path.startswith('/api/tasks/') and path.endswith('/promote-project') and method == 'POST':
+                parts = path.split('/')
+                if len(parts) != 5:
+                    raise ValueError('事项位置无效。')
+                return self.send_json(201, store.promote_task_to_project(parts[3], data))
             if path.startswith('/api/tasks/'):
                 item_id = path.split('/')[-1]
                 if method == 'DELETE':

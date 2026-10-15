@@ -9,7 +9,8 @@ const quadNames = ['重要且紧急','重要不紧急','不重要但紧急','不
 const quadHints = ['及时处理，解除当前阻塞','保护时间，让长期目标向前','委派协作，保留检查节点','暂存想法，有余力时再看'];
 let state = {tasks:[],projects:[],goals:[],notes:[],files:[],notifications:[],settings:{},messages:[],focus:[],today:''};
 let modelInfo = {models:[],default:''};
-let view = 'home', projectFilter = '', projectArea = '', search = '', showDone = false;
+let view = 'home', projectFilter = '', projectArea = '', selectedProjectId = '', search = '', showDone = false;
+let projectFromTaskId = '';
 let notesScope = 'all', showArchivedNotes = false;
 let documentProjectId = '', documentPath = '';
 let overviewMode = localStorage.getItem('desk-overview-mode') || 'week';
@@ -42,6 +43,7 @@ function project(id) {return state.projects.find(p=>p.id===id);}
 function taskById(id) {return state.tasks.find(t=>t.id===id);}
 function activeTasks() {return state.tasks.filter(t=>!t.deleted_at);}
 function visibleTasks() {return activeTasks().filter(t=>(showDone||t.status!=='done')&&(!projectFilter||t.project_id===projectFilter)&&(!search||[t.title,t.notes,t.assignee,project(t.project_id)?.name].some(x=>String(x||'').toLowerCase().includes(search.toLowerCase()))));}
+function homeTasks() {return visibleTasks().filter(t=>t.repeat==='none'||(t.status!=='done'&&(!t.occurrence&&!t.scheduled_at&&!t.deadline||(t.occurrence||t.scheduled_at?.slice(0,10)||t.deadline)<=state.today)));}
 function qIndex(t) {return t.important ? (t.urgent?0:1) : (t.urgent?2:3);}
 function color(p) {return /^#[0-9a-fA-F]{6}$/.test(p?.color||'')?p.color:'#4263eb';}
 function colorStyle(t) {return `--project-color:${color(project(t.project_id))}`;}
@@ -74,7 +76,7 @@ function scheduleChip(t, month=false) {
 }
 function renderNavigation() {
   const projects=state.projects.filter(p=>!p.deleted_at);
-  $('#project-navigation').innerHTML=categoryNames().map(area=>`<button class="project-nav-item${view==='projects'&&projectArea===area?' active':''}" data-action="open-category" data-area="${esc(area)}"><span>${esc(area)}</span></button>${projectArea===area?projects.filter(p=>projectKind(p)!=='category'&&p.area===area).map(p=>`<button class="project-nav-item nested-project" data-action="filter-project" data-id="${p.id}">${esc(p.name)}</button>`).join(''):''}`).join('');
+  $('#project-navigation').innerHTML=categoryNames().map(area=>`<button class="project-nav-item${view==='projects'&&projectArea===area&&!selectedProjectId?' active':''}" data-action="open-category" data-area="${esc(area)}"><span>${esc(area)}</span></button>${projectArea===area?projects.filter(p=>projectKind(p)!=='category'&&p.area===area).map(p=>`<button class="project-nav-item nested-project${selectedProjectId===p.id?' active':''}" data-action="open-project-detail" data-id="${p.id}">${esc(p.name)}</button>`).join(''):''}`).join('');
   const select=$('#project-filter');select.innerHTML='<option value="">全部项目</option>'+projects.map(p=>`<option value="${p.id}">${esc(projectKind(p)==='category'?p.name+' · 类别事项':p.area+' / '+p.name)}</option>`).join('');select.value=projectFilter;
   $('#clear-filter').hidden=!projectFilter&&!search;$('#show-done').checked=showDone;
   $$('[data-nav]').forEach(b=>{b.classList.toggle('active',b.dataset.nav===view);b.setAttribute('aria-current',b.dataset.nav===view?'page':'false');});
@@ -94,7 +96,7 @@ function render() {
   fillAreaOptions();renderHistory();renderFocus();renderAttachments();
 }
 function homeView() {
-  const tasks=visibleTasks();const active=tasks.filter(t=>t.status!=='done');const today=dayTasks(state.today);
+  const tasks=homeTasks();const active=tasks.filter(t=>t.status!=='done');const today=dayTasks(state.today).filter(t=>t.repeat==='none'||t.status!=='done');
   const overdue=active.filter(t=>t.deadline&&t.deadline<state.today).length;const wait=active.filter(t=>t.status==='waiting').length;
   const stats=`<div class="mini-stats"><span class="mini-stat"><b>${active.length}</b>待推进</span><span class="mini-stat"><b>${today.filter(t=>t.status!=='done').length}</b>今日安排</span><span class="mini-stat"><b>${wait}</b>等待事项</span>${overdue?`<span class="mini-stat alert"><b>${overdue}</b>已逾期</span>`:''}</div>`;
   const welcome=activeTasks().length?'':`<div class="welcome-banner"><div><strong>把脑中的事情，先放下来。</strong><p>告诉秘书你的安排，或手动添加第一项。从一件重要的事开始。</p></div><button class="primary-button" data-action="welcome-ai">和秘书聊聊 ↗</button></div>`;
@@ -117,12 +119,17 @@ function projectsView() {
     const areas=categoryNames().filter(area=>!search||area.toLowerCase().includes(search.toLowerCase())||categoryProjects(area).some(projectMatches)||categoryTasks(area).some(taskMatches));
     return `<div class="category-page-actions"><button class="primary-button" data-action="new-category">＋ 新建类别</button></div><div class="category-grid">${areas.map(area=>{const projects=categoryProjects(area),direct=categoryTasks(area).filter(t=>t.status!=='done');return `<button class="category-card" data-action="open-category" data-area="${esc(area)}"><span class="category-symbol" aria-hidden="true">▧</span><h2>${esc(area)}</h2><p>${projects.filter(p=>projectKind(p)==='project').length} 个项目 · ${projects.filter(p=>projectKind(p)==='activity').length} 个活动安排 · ${direct.length} 项类别待办</p><span class="category-enter">查看项目与事项 →</span></button>`;}).join('')}</div>${areas.length?'':empty('没有匹配的类别或项目','','','')}`;
   }
+  if(selectedProjectId){
+    const selected=categoryProjects(projectArea).find(p=>p.id===selectedProjectId);
+    if(selected)return `<div class="project-detail"><div class="category-breadcrumb"><button class="inline-link" data-action="all-categories">全部类别</button><span>／</span><button class="inline-link" data-action="open-category" data-area="${esc(projectArea)}">${esc(projectArea)}</button><span>／</span><h2>${esc(selected.name)}</h2></div><div class="category-page-actions"><button class="quiet-button" data-action="open-category" data-area="${esc(projectArea)}">← 所有项目</button><button class="primary-button" data-action="edit-project" data-id="${selected.id}">编辑项目与进度</button></div>${projectCards([selected])}</div>`;
+    selectedProjectId='';
+  }
   const projects=categoryProjects(projectArea).filter(projectMatches),direct=categoryTasks(projectArea).filter(t=>(showDone||t.status!=='done')&&taskMatches(t));
   return `<div class="category-breadcrumb"><button class="inline-link" data-action="all-categories">全部类别</button><span>／</span><h2>${esc(projectArea)}</h2></div><div class="category-page-actions"><button class="quiet-button" data-action="new-category-event">＋ 活动 / 聚餐</button><button class="quiet-button" data-action="new-category-task">＋ 类别事项</button><button class="primary-button" data-action="new-project">＋ 新建项目</button></div>${projects.length?projectCards(projects):empty(search?'没有匹配的项目':'这个类别还没有具体项目','可以添加项目和负责人，或直接记录一次性安排。','','')}<section class="category-direct"><div class="growth-section-heading"><h2>类别事项与活动</h2><span>无需设置项目进度</span></div>${direct.length?direct.map(t=>taskCard(t,false)).join(''):'<p class="help-text">聚餐、会议或暂未归入具体项目的事项显示在这里。</p>'}</section>`;
 }
 function projectCards(projects) {
   if(!projects.length)return empty('项目','','new-project','＋ 创建项目');
-  return `<div class="project-grid">${projects.map(p=>{const all=activeTasks().filter(t=>t.project_id===p.id);const ts=all.filter(t=>(showDone||t.status!=='done')&&taskMatches(t));const completed=all.filter(t=>t.status==='done').length;const ms=projectKind(p)==='project'?(p.milestones||[]):[];const doneMs=ms.filter(m=>m.done).length;const expanded=expandedProjects.has(p.id);const tracks=projectKind(p)==='project'?(p.tracks||[]):[];const trackHtml=tracks.length?`<div class="track-list">${tracks.map((tr,i)=>`<div class="track-row"><div class="track-label"><span>${esc(tr.title)}</span><span class="track-percent">${tr.percent}%</span></div><div class="progress-track track-bar" role="progressbar" aria-valuenow="${tr.percent}" aria-valuemin="0" aria-valuemax="100" aria-label="${esc(tr.title)} 进度 ${tr.percent}%"><div class="progress-fill" style="width:${tr.percent}%"></div></div><input type="range" min="0" max="100" step="5" value="${tr.percent}" data-track="${p.id}" data-track-index="${i}" aria-label="调整 ${esc(tr.title)} 进度"></div>`).join('')}</div>`:'';return `<section class="project-card" style="--project-color:${color(p)}"><div class="project-card-header"><h2><i class="color-dot"></i>${esc(p.name)}</h2><button class="icon-button" data-action="edit-project" data-id="${p.id}" aria-label="编辑项目 ${esc(p.name)}">⋯</button></div><div class="project-owner">${projectKind(p)==='activity'?'活动安排':'具体项目'} · 负责人：${esc(p.owner||'未填写')}</div><p class="project-goal">${esc(p.goal||'')}</p><div class="project-counts"><span>已完成 ${completed}/${all.length} 项</span><span>等待 ${all.filter(t=>t.status==='waiting').length} 项</span>${p.deadline?`<span>目标 ${fmtDate(p.deadline)}</span>`:''}</div>${projectProgress(p)}${trackHtml}${ms.length?`<div class="progress-track" aria-label="里程碑完成 ${doneMs} / ${ms.length}"><div class="progress-fill" style="width:${doneMs/ms.length*100}%"></div></div><div class="project-counts">里程碑 ${doneMs}/${ms.length}</div><div class="milestone-list">${ms.map((m,i)=>`<label class="milestone-row${m.done?' completed':''}"><input type="checkbox" data-milestone="${p.id}" data-index="${i}" ${m.done?'checked':''}><span>${esc(m.title)}</span></label>`).join('')}</div>`:''}${(expanded?ts:ts.slice(0,4)).map(t=>taskCard(t)).join('')}<div class="project-card-footer"><button class="inline-link" data-action="filter-project" data-id="${p.id}">查看事项 →</button><button class="inline-link" data-action="new-project-task" data-id="${p.id}">＋ 添加下一步</button>${ts.length>4?`<button class="inline-link" data-action="expand-project" data-id="${p.id}">${expanded?'收起':'展开全部 '+ts.length+' 项'}</button>`:''}</div></section>`;}).join('')}</div>`;
+  return `<div class="project-grid">${projects.map(p=>{const all=activeTasks().filter(t=>t.project_id===p.id);const ts=all.filter(t=>(showDone||t.status!=='done')&&taskMatches(t));const completed=all.filter(t=>t.status==='done').length;const ms=projectKind(p)==='project'?(p.milestones||[]):[];const doneMs=ms.filter(m=>m.done).length;const expanded=expandedProjects.has(p.id);const tracks=projectKind(p)==='project'?(p.tracks||[]):[];const trackHtml=tracks.length?`<div class="track-list">${tracks.map((tr,i)=>`<div class="track-row"><div class="track-label"><span>${esc(tr.title)}</span><span class="track-percent">${tr.percent}%</span></div><div class="progress-track track-bar" role="progressbar" aria-valuenow="${tr.percent}" aria-valuemin="0" aria-valuemax="100" aria-label="${esc(tr.title)} 进度 ${tr.percent}%"><div class="progress-fill" style="width:${tr.percent}%"></div></div><input type="range" min="0" max="100" step="5" value="${tr.percent}" data-track="${p.id}" data-track-index="${i}" aria-label="调整 ${esc(tr.title)} 进度"></div>`).join('')}</div>`:'';return `<section class="project-card" style="--project-color:${color(p)}"><div class="project-card-header"><h2><i class="color-dot"></i>${esc(p.name)}</h2><button class="icon-button" data-action="edit-project" data-id="${p.id}" aria-label="编辑项目 ${esc(p.name)}">⋯</button></div><div class="project-owner">${projectKind(p)==='activity'?'活动安排':'具体项目'} · 负责人：${esc(p.owner||'未填写')}</div><p class="project-goal">${esc(p.goal||'')}</p><div class="project-counts"><span>已完成 ${completed}/${all.length} 项</span><span>等待 ${all.filter(t=>t.status==='waiting').length} 项</span>${p.deadline?`<span>目标 ${fmtDate(p.deadline)}</span>`:''}</div>${projectProgress(p)}${trackHtml}${ms.length?`<div class="progress-track" aria-label="里程碑完成 ${doneMs} / ${ms.length}"><div class="progress-fill" style="width:${doneMs/ms.length*100}%"></div></div><div class="project-counts">里程碑 ${doneMs}/${ms.length}</div><div class="milestone-list">${ms.map((m,i)=>`<label class="milestone-row${m.done?' completed':''}"><input type="checkbox" data-milestone="${p.id}" data-index="${i}" ${m.done?'checked':''}><span>${esc(m.title)}</span></label>`).join('')}</div>`:''}${(expanded?ts:ts.slice(0,4)).map(t=>taskCard(t)).join('')}<div class="project-card-footer"><button class="inline-link" data-action="open-project-detail" data-id="${p.id}">查看项目 →</button><button class="inline-link" data-action="new-project-task" data-id="${p.id}">＋ 添加下一步</button>${ts.length>4?`<button class="inline-link" data-action="expand-project" data-id="${p.id}">${expanded?'收起':'展开全部 '+ts.length+' 项'}</button>`:''}</div></section>`;}).join('')}</div>`;
 }
 function overviewView() {
   let range;
@@ -184,6 +191,7 @@ function openTask(t=null, defaults={}) {
   for(const [key,value] of Object.entries(source)){const field=form.elements.namedItem(key);if(!field)continue;if(field.type==='checkbox')field.checked=!!value;else field.value=value??'';}
   form.elements.checklist_text.value=checklistText(source.checklist);$('#task-editor-title').textContent=t?'事项详情':'新建事项';
   $('#archive-task').hidden=!source.id;$('#start-focus').hidden=!source.id||source.status==='done'||source.kind==='event';
+  $('#promote-task-project').hidden=!source.id||!source.project_id||source.kind==='event';
   openDialog('task-dialog');setTimeout(()=>form.elements.title.focus(),50);
 }
 function taskFormData() {
@@ -197,12 +205,14 @@ async function saveTask(close=true) {
   const t=await api(id?'/api/tasks/'+id:'/api/tasks',id?'PATCH':'POST',data);
   if(close)closeDialog('task-dialog');await refresh();toast(id?'事项已更新':'事项已加入指挥台');return t;
 }
-function openProject(p=null) {
+function openProject(p=null, fromTask=null) {
+  projectFromTaskId=fromTask?.id||'';
   const form=$('#project-form');form.reset();$('#project-error').textContent='';
-  const source={id:'',name:'',area:projectArea||state.settings?.areas?.[0]||'',project_type:'project',owner:'',color:'#4263eb',goal:'',deadline:'',progress:null,milestones:[],tracks:[],...(p||{})};
+  const parent=fromTask?project(fromTask.project_id):null;
+  const source={id:'',name:fromTask?.title||'',area:parent?.area||projectArea||state.settings?.areas?.[0]||'',project_type:'project',owner:fromTask?.assignee||'',color:parent?.color||'#4263eb',goal:'',deadline:'',progress:null,milestones:[],tracks:[],...(p||{})};
   for(const [k,v] of Object.entries(source)){if(form.elements.namedItem(k))form.elements[k].value=v??'';}
   form.elements.milestones_text.value=checklistText(source.milestones);form.elements.tracks_text.value=tracksText(source.tracks);
-  updateProjectFields();$('#project-editor-title').textContent=p?'项目详情':'新建项目';$('#delete-project').hidden=!source.id;$('#project-documents-button').hidden=!source.id||projectKind(source)!=='project';openDialog('project-dialog');
+  updateProjectFields();$('#project-editor-title').textContent=p?'项目详情':fromTask?'设为独立项目':'新建项目';$('#delete-project').hidden=!source.id;$('#project-documents-button').hidden=!source.id||projectKind(source)!=='project';form.elements.area.readOnly=!!fromTask;form.elements.project_type.disabled=!!fromTask;openDialog('project-dialog');
 }
 function updateProjectFields() {const formal=$('#project-form').elements.project_type.value==='project';$('#project-progress-fields').hidden=!formal;$('#project-milestone-fields').hidden=!formal;$('#project-form').elements.progress.disabled=!formal;}
 $('#project-form').elements.project_type.addEventListener('change',updateProjectFields);
@@ -330,9 +340,10 @@ async function refresh() {
   catch(e){$('#service-status').textContent='● 本机连接已断开';$('#service-status').classList.add('offline');throw e;}
   finally{refreshing=false;}
 }
-function openCategory(area) {projectArea=area;view='projects';location.hash='projects/'+encodeURIComponent(area);render();}
-function readRoute() {const hash=location.hash.slice(1);if(hash.startsWith('projects/')){try{projectArea=decodeURIComponent(hash.slice(9));}catch{projectArea='';}view='projects';}else if(hash.startsWith('notes/')){notesScope=decodeURIComponent(hash.slice(6));view='notes';}else{view=['home','projects','overview','goals','notes','trash'].includes(hash)?hash:hash==='habits'?'goals':'home';if(view==='projects')projectArea='';if(view==='notes')notesScope='all';}}
-function navigate(next) {if(next==='projects')projectArea='';if(next==='notes')notesScope='all';if(next==='habits')next='goals';view=['home','projects','overview','goals','notes','habits','trash'].includes(next)?next:'home';location.hash=view;render();}
+function openCategory(area) {projectArea=area;selectedProjectId='';view='projects';location.hash='projects/'+encodeURIComponent(area);render();}
+function openProjectDetail(id) {const p=project(id);if(!p||p.deleted_at)return;projectArea=p.area;selectedProjectId=id;view='projects';location.hash='projects/'+encodeURIComponent(p.area)+'/'+encodeURIComponent(id);render();}
+function readRoute() {const hash=location.hash.slice(1);if(hash.startsWith('projects/')){const parts=hash.slice(9).split('/');try{projectArea=decodeURIComponent(parts[0]);selectedProjectId=parts[1]?decodeURIComponent(parts[1]):'';}catch{projectArea='';selectedProjectId='';}view='projects';}else if(hash.startsWith('notes/')){notesScope=decodeURIComponent(hash.slice(6));view='notes';}else{view=['home','projects','overview','goals','notes','trash'].includes(hash)?hash:hash==='habits'?'goals':'home';if(view==='projects'){projectArea='';selectedProjectId='';}if(view==='notes')notesScope='all';}}
+function navigate(next) {if(next==='projects'){projectArea='';selectedProjectId='';}if(next==='notes')notesScope='all';if(next==='habits')next='goals';view=['home','projects','overview','goals','notes','habits','trash'].includes(next)?next:'home';location.hash=view;render();}
 function notesView() {
   const all=state.notes||[],projects=state.projects.filter(p=>projectKind(p)==='project'&&(!p.deleted_at||all.some(n=>n.project_id===p.id&&!n.deleted_at)));
   const active=all.filter(n=>!n.deleted_at),archived=all.filter(n=>n.deleted_at);
@@ -422,7 +433,9 @@ async function action(name, button) {
   if(name==='new-habit')return openTask(null,{project_id:'',kind:'habit',repeat:'weekly',duration:30});
   if(name==='new-quadrant-task'){const q=Number(button.dataset.q);return openTask(null,{important:q<2,urgent:q===0||q===2});}
   if(name==='edit-task'){const t=taskById(id);if(!t)return toast('事项已变化，请刷新。',true);if($('#day-dialog').open)closeDialog('day-dialog');return openTask(t);}
+  if(name==='promote-task-project'){const t=taskById($('#task-form').elements.id.value);if(!t)return;closeDialog('task-dialog');return openProject(null,t);}
   if(name==='edit-project')return openProject(project(id));
+  if(name==='open-project-detail')return openProjectDetail(id);
   if(name==='new-project-task')return openTask(null,{project_id:id});
   if(name==='filter-project'){projectFilter=id;view='home';location.hash='home';return render();}
   if(name==='clear-filter'){projectFilter='';search='';$('#task-search').value='';return render();}
@@ -510,7 +523,7 @@ document.addEventListener('change',async event=>{
 });
 let searchTimer;$('#task-search').addEventListener('input',e=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>{search=e.target.value.trim();render();},150);});
 $('#task-form').addEventListener('submit',async e=>{e.preventDefault();const submit=$('button[type=submit]',e.target);submit.disabled=true;$('#task-error').textContent='';try{await saveTask();}catch(error){$('#task-error').textContent=error.message;}finally{submit.disabled=false;}});
-$('#project-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.target,data=Object.fromEntries(new FormData(form)),id=data.id;delete data.id;if(data.progress!==undefined)data.progress=data.progress.trim()===''?null:Number(data.progress);data.milestones=parseChecklist(data.milestones_text);delete data.milestones_text;data.tracks=parseTracks(data.tracks_text);delete data.tracks_text;const submit=$('button[type=submit]',form);submit.disabled=true;try{await api(id?'/api/projects/'+id:'/api/projects',id?'PATCH':'POST',data);closeDialog('project-dialog');await refresh();toast('项目已保存。');}catch(error){$('#project-error').textContent=error.message;}finally{submit.disabled=false;}});
+$('#project-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.target,data=Object.fromEntries(new FormData(form)),id=data.id;delete data.id;if(projectFromTaskId)data.project_type='project';if(data.progress!==undefined)data.progress=data.progress.trim()===''?null:Number(data.progress);data.milestones=parseChecklist(data.milestones_text);delete data.milestones_text;data.tracks=parseTracks(data.tracks_text);delete data.tracks_text;const submit=$('button[type=submit]',form);submit.disabled=true;try{const result=await api(projectFromTaskId?'/api/tasks/'+projectFromTaskId+'/promote-project':id?'/api/projects/'+id:'/api/projects',projectFromTaskId||!id?'POST':'PATCH',data);closeDialog('project-dialog');projectFromTaskId='';await refresh();if(result.project)openProjectDetail(result.project.id);toast(result.project?'已设为独立项目，原事项与周期记录保留。':'项目已保存。');}catch(error){$('#project-error').textContent=error.message;}finally{submit.disabled=false;}});
 $('#note-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.target,data=Object.fromEntries(new FormData(form)),id=data.id;delete data.id;const button=$('button[type=submit]',form);button.disabled=true;$('#note-error').textContent='';try{await api(id?'/api/notes/'+id:'/api/notes',id?'PATCH':'POST',data);closeDialog('note-dialog');await refresh();toast('笔记已保存。');}catch(error){$('#note-error').textContent=error.message;}finally{button.disabled=false;}});
 $('#settings-form').addEventListener('submit',async e=>{e.preventDefault();const form=e.target,data=Object.fromEntries(new FormData(form));data.review_enabled=form.elements.review_enabled.checked;data.workdays=$$('input[name=workday]:checked',form).map(c=>Number(c.value));delete data.workday;data.capacity=Number(data.capacity);data.buffer_minutes=Number(data.buffer_minutes);data.reminder_minutes=Number(data.reminder_minutes);try{await api('/api/settings','POST',data);closeDialog('settings-dialog');await refresh();toast('时间与跟进偏好已保存。');}catch(error){$('#settings-error').textContent=error.message;}});
 let dragId='';

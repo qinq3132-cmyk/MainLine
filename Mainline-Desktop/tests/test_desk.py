@@ -105,6 +105,28 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(by_id[activity['id']]['project_type'], 'activity')
         self.assertEqual(self.store.get('tasks', meeting['id'])['project_id'], category['id'])
 
+    def test_promote_repeat_series_preserves_history_and_separate_progress(self):
+        parent = self.store.project({'name': '原项目', 'area': '通信组', 'progress': 25})
+        first = self.store.task({'title': '每周复盘', 'project_id': parent['id'],
+                                 'repeat': 'weekly', 'deadline': (server.now().date()-dt.timedelta(days=7)).isoformat()})
+        self.store.task({'status': 'done'}, first['id'])
+        series = [t for t in self.store.all('tasks') if t['id'] == first['id'] or t.get('repeat_parent') == first['id']]
+        self.assertEqual(len(series), 2)
+        untouched = self.store.task({'title': '其他事项', 'project_id': parent['id']})
+        before = {t['id']: (t['status'], t.get('completed_at'), t.get('occurrence')) for t in series}
+        result = self.store.promote_task_to_project(first['id'], {'name': '每周复盘项目', 'area': '通信组',
+                                                                  'project_type': 'project', 'progress': 40})
+        self.assertEqual(result['moved_count'], 2)
+        self.assertEqual(result['project']['progress'], 40)
+        for task_id, values in before.items():
+            moved = self.store.get('tasks', task_id)
+            self.assertEqual(moved['project_id'], result['project']['id'])
+            self.assertEqual((moved['status'], moved.get('completed_at'), moved.get('occurrence')), values)
+        self.assertEqual(self.store.get('tasks', untouched['id'])['project_id'], parent['id'])
+        self.assertEqual(self.store.get('projects', parent['id'])['progress'], 25)
+        with self.assertRaises(ValueError):
+            self.store.promote_task_to_project(untouched['id'], {'name': '错误类别', 'area': '生活', 'project_type': 'project'})
+
     def test_legacy_category_classification_does_not_rewrite_records(self):
         category = self.store.get('projects', self.pid)
         category.pop('project_type', None)
@@ -210,6 +232,8 @@ class StoreTests(unittest.TestCase):
             self.assertEqual(plan['unplaced'][0]['id'],huge['id'])
             t=self.task(title='下次事项',repeat='weekly',duration=30)
             self.store.put('tasks',{**t,'occurrence':'2026-10-19'})
+            with self.assertRaisesRegex(ValueError,'尚未到期'):
+                self.store.task({'status':'done'},t['id'])
             plan=server.build_plan(self.store.all('tasks'),self.store.settings(),'2026-10-14',7,[t['id']])
             self.assertGreaterEqual(plan['items'][0]['scheduled_at'][:10],'2026-10-19')
 
