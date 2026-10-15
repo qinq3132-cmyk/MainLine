@@ -373,8 +373,15 @@ class ApiTests(unittest.TestCase):
         first=self.request('/api/ai/apply','POST',{'job_id':job['id'],'selected':['task:0','update:0']})
         self.assertEqual(len(first['applied']),1)
         self.assertEqual(len(first['skipped']),1)
+        self.assertTrue(self.store.get('jobs',job['id'])['archived_at'])
+        history=self.store.all('messages')
+        self.assertEqual(len(history),1)
+        self.assertEqual(history[0]['mode'],'application')
+        self.assertIn('新增：新任务',history[0]['content'])
+        self.assertIn('未应用',history[0]['content'])
         second=self.request('/api/ai/apply','POST',{'job_id':job['id'],'selected':['task:0']})
         self.assertEqual(second['applied'],[])
+        self.assertEqual(len(self.store.all('messages')),1)
         self.assertEqual(self.store.get('tasks',fixed['id'])['scheduled_at'],day+'T10:00')
 
     def test_reminder_deduplication(self):

@@ -309,6 +309,10 @@ async function pollJob(id) {
 }
 function renderAI() {
   if(!currentJob?.result){$('#ai-result').innerHTML='';return;}
+  if(currentJob.archived_at||currentJob.applied?.length){
+    $('#ai-result').innerHTML=`<div class="ai-reply">${esc(currentJob.result.summary)}</div><div class="ai-archive-note">${esc(currentJob.application_summary||'这次建议已处理，事项和历史记录已保存在本机。')}</div>`;
+    return;
+  }
   const result=currentJob.result,applied=new Set(currentJob.applied||[]);
   let html=`<div class="ai-reply">${esc(result.summary)}</div>`;
   if(result.questions?.length)html+=`<div class="ai-questions">${result.questions.map(q=>`<div>· ${esc(typeof q==='string'?q:JSON.stringify(q))}</div>`).join('')}</div>`;
@@ -320,7 +324,7 @@ function renderAI() {
   $('#ai-result').innerHTML=html;
 }
 function changeLabel(key,value) {const labels={title:'事项',status:'状态',important:'重要',urgent:'紧急',duration:'时长',deadline:'截止',scheduled_at:'执行时间',followup_date:'检查日期',assignee:'负责人',notes:'备注',repeat:'重复',kind:'类型',project_id:'项目',fixed:'固定时间',checklist:'子任务'};let display=value;if(key==='status')display=statusNames[value]||value;if(key==='kind')display=kindNames[value]||value;if(key==='project_id')display=project(value)?.name||'未分项目';if(typeof value==='boolean')display=value?'是':'否';if(typeof value==='object')display=JSON.stringify(value);return (labels[key]||key)+'：'+(display||'清空');}
-function renderHistory() {$('#conversation-history').innerHTML=state.messages.slice(-20).map(m=>`<div class="history-message"><strong>${m.role==='user'?'你':'秘书'} · ${fmtDate(m.created_at)} ${fmtTime(m.created_at)}</strong>${esc(m.content)}${m.job_id?`<div><button class="inline-link" data-action="open-job" data-id="${m.job_id}">查看这次建议 →</button></div>`:''}</div>`).join('')||'<p class="help-text">对话会保存在本机。</p>';}
+function renderHistory() {$('#conversation-history').innerHTML=state.messages.slice(-20).map(m=>`<div class="history-message${m.mode==='application'?' application-record':''}"><strong>${m.role==='user'?'你':m.mode==='application'?'秘书 · 应用记录':'秘书'} · ${fmtDate(m.created_at)} ${fmtTime(m.created_at)}</strong>${esc(m.content)}${m.job_id&&m.mode!=='application'?`<div><button class="inline-link" data-action="open-job" data-id="${m.job_id}">查看这次分析 →</button></div>`:''}</div>`).join('')||'<p class="help-text">对话会保存在本机。</p>';}
 function renderPlan() {
   if(!pendingPlan)return;
   $('#plan-result').innerHTML=pendingPlan.items.map((p,i)=>`<div class="plan-row"><label><input type="checkbox" name="plan-item" value="${i}" checked><span>${esc(p.title)}<small>${hours(p.duration)} · ${esc(p.reason)}</small></span></label><time>${fmtDate(p.scheduled_at)} ${fmtTime(p.scheduled_at)}</time></div>`).join('')+(pendingPlan.unplaced.length?`<div class="unplaced"><strong>这些事项还需要你的判断</strong>${pendingPlan.unplaced.map(p=>`<p style="margin:10px 0 0">${esc(p.title)}<br><small>${esc(p.reason)}</small></p>`).join('')}</div>`:'');
@@ -467,7 +471,7 @@ async function action(name, button) {
   }
   if(name==='select-proposals'){$$('input[name=proposal]:not(:disabled)').forEach(c=>c.checked=true);return;}
   if(name==='edit-proposal'){const t=currentJob.result.tasks[Number(button.dataset.index)];return openTask(null,t);}
-  if(name==='apply-proposals'){const selected=$$('input[name=proposal]:checked:not(:disabled)').map(c=>c.value);if(!selected.length)return toast('请至少选择一项建议。');button.disabled=true;try{const r=await api('/api/ai/apply','POST',{job_id:currentJob.id,selected});currentJob=await api('/api/jobs/'+currentJob.id);await refresh();renderAI();toast(`已应用 ${r.applied.length} 项建议`);if(r.skipped.length)$('#ai-status').textContent=r.skipped.map(s=>s.reason).join('\n');}finally{button.disabled=false;}return;}
+  if(name==='apply-proposals'){const selected=$$('input[name=proposal]:checked:not(:disabled)').map(c=>c.value);if(!selected.length)return toast('请至少选择一项建议。');button.disabled=true;try{const r=await api('/api/ai/apply','POST',{job_id:currentJob.id,selected});currentJob=null;localStorage.removeItem('desk-last-job');$('#ai-result').innerHTML='';$('#ai-status').textContent=r.skipped.length?`已处理；${r.skipped.length} 项未应用，详情见对话记录。`:'已应用，记录已收进对话记录。';await refresh();$('.conversation-history').open=true;$('#conversation-history').lastElementChild?.scrollIntoView({block:'nearest',behavior:'smooth'});toast(`已应用 ${r.applied.length} 项建议`);}finally{button.disabled=false;}return;}
   if(name==='open-job'){currentJob=await api('/api/jobs/'+id);if(currentJob.status!=='done')return toast(currentJob.error||'这次请求尚未完成。',true);localStorage.setItem('desk-last-job',id);renderAI();$('#assistant-panel').classList.add('open');$('#ai-result').scrollIntoView({block:'nearest',behavior:'smooth'});return;}
   if(name==='archive-task'){const taskId=$('#task-form').elements.id.value;if(!taskId)return;await api('/api/tasks/'+taskId,'DELETE',{});closeDialog('task-dialog');await refresh();return toast('已移入回收站，可以恢复。');}
   if(name==='restore-task'){await api('/api/tasks/'+id,'PATCH',{restore:true});await refresh();return toast('事项已恢复。');}
@@ -537,7 +541,7 @@ document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLower
 window.addEventListener('hashchange',()=>{readRoute();render();});
 async function initialize() {
   try{const [s,m,j]=await Promise.all([api('/api/state'),api('/api/models'),api('/api/jobs')]);state=s;modelInfo=m;overviewDate=s.today;readRoute();render();renderModels();$('#service-status').textContent='● 本机服务运行中';deliverNotifications();
-    const lastId=localStorage.getItem('desk-last-job'),last=j.jobs.find(x=>x.id===lastId)||[...j.jobs].reverse().find(x=>x.status==='done'&&x.mode!=='test');if(last?.status==='done'){currentJob=last;$('#ai-result').innerHTML=`<button class="inline-link previous-result" data-action="open-job" data-id="${esc(last.id)}">上次建议 →</button>`;}else if(last?.status==='running'){busyAI=true;$('#ai-submit').disabled=true;pollJob(last.id).catch(e=>$('#ai-status').textContent=e.message).finally(()=>{busyAI=false;$('#ai-submit').disabled=false;});}
+    const lastId=localStorage.getItem('desk-last-job'),last=j.jobs.find(x=>x.id===lastId&&!x.archived_at&&!x.applied?.length)||[...j.jobs].reverse().find(x=>x.status==='done'&&x.mode!=='test'&&!x.archived_at&&!x.applied?.length);if(last?.status==='done'){currentJob=last;$('#ai-result').innerHTML=`<button class="inline-link previous-result" data-action="open-job" data-id="${esc(last.id)}">上次建议 →</button>`;}else if(last?.status==='running'){busyAI=true;$('#ai-submit').disabled=true;pollJob(last.id).catch(e=>$('#ai-status').textContent=e.message).finally(()=>{busyAI=false;$('#ai-submit').disabled=false;});}
   }catch(e){$('#page-content').innerHTML=empty('还没有连接到本机服务','请双击“启动个人指挥台.cmd”，再刷新这个页面。','','');$('#service-status').textContent='● 本机连接未就绪';$('#service-status').classList.add('offline');toast(e.message,true);}
 }
 initialize();

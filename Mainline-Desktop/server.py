@@ -1557,8 +1557,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     job = store.get('jobs', data.get('job_id'))
                     if not job or job['status'] != 'done':
                         raise ValueError('建议尚未完成。')
+                    if job.get('archived_at'):
+                        return self.send_json(200, {'applied': [], 'skipped': [], 'archived': True})
                     selected = data.get('selected', [])
-                    applied, skipped = [], []
+                    if not isinstance(selected, list) or not 1 <= len(selected) <= 40 or any(not isinstance(token, str) for token in selected):
+                        raise ValueError('请选择要应用的建议。')
+                    applied, skipped, applied_labels = [], [], []
                     for token in selected:
                         if token in job.get('applied', []):
                             continue
@@ -1581,11 +1585,24 @@ class Handler(http.server.BaseHTTPRequestHandler):
                             else:
                                 continue
                             applied.append(record['id'])
+                            applied_labels.append(('新增' if kind == 'task' else '调整') + '：' + record['title'])
                             job.setdefault('applied', []).append(token)
                         except (ValueError, TypeError, KeyError, IndexError) as exc:
                             skipped.append({'token': token, 'reason': str(exc) if isinstance(exc, ValueError) else '建议格式不正确。'})
-                    store.put('jobs', job)
-                return self.send_json(200, {'applied': applied, 'skipped': skipped})
+                    lines = ['本次建议已处理。']
+                    lines.extend(applied_labels)
+                    if skipped:
+                        lines.append(f'{len(skipped)} 项未应用：' + '；'.join(item['reason'] for item in skipped))
+                    if not applied and not skipped:
+                        lines.append('所选建议此前已经应用，没有重复写入。')
+                    job['application_summary'] = '\n'.join(lines)
+                    job['archived_at'] = stamp()
+                    message = {'id': uid(), 'role': 'assistant', 'mode': 'application',
+                               'content': job['application_summary'], 'job_id': job['id'], 'created_at': stamp()}
+                    with store.connect() as db:
+                        db.execute('INSERT OR REPLACE INTO jobs(id,data) VALUES(?,?)', (job['id'], json.dumps(job, ensure_ascii=False)))
+                        db.execute('INSERT INTO messages(id,data) VALUES(?,?)', (message['id'], json.dumps(message, ensure_ascii=False)))
+                return self.send_json(200, {'applied': applied, 'skipped': skipped, 'archived': True})
             if path == '/api/plan':
                 return self.send_json(200, build_plan(store.all('tasks'), store.settings(), data.get('start') or now().date().isoformat(), data.get('days', 7), data.get('ids')))
             if path == '/api/plan/apply':

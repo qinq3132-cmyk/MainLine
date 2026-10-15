@@ -22,7 +22,7 @@ Mainline 是一个本地运行的可视化个人秘书：四象限管理、两�
 
 ## Windows 下载安装
 
-**[下载最新版单文件 Mainline.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v7.exe)**（Windows 64 位，2026-10-15 更新版）。下载后将 EXE 放在自己选择的文件夹，双击运行；无需安装 Python，也无需下载源码。它是免安装桌面版，不是 Setup 安装器。v7 优化了周期事项的首页显示，并支持把事项设为独立二级项目；首次启动仍可能因自解压稍慢。
+**[下载最新版单文件 Mainline.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v8.exe)**（Windows 64 位，2026-10-15 更新版）。下载后将 EXE 放在自己选择的文件夹，双击运行；无需安装 Python，也无需下载源码。它是免安装桌面版，不是 Setup 安装器。v8 在应用秘书建议后自动收起建议，将处理结果记入本机对话记录；首次启动仍可能因自解压稍慢。
 
 关闭旧版窗口后再运行新版。聊天、日程、任务等记录默认保存在 `%LOCALAPPDATA%\Mainline\data`，更新 EXE 不会重置这些记录，首次运行新版本还会自动备份数据库。模型 API Key 和 Server酱 SendKey **都不包含在下载包中**，请在程序的“偏好与数据”中自行配置。详细步骤、旧网页数据迁移方法和校验值见[Windows EXE 安装说明](Mainline-Desktop/Windows-EXE-安装.md)。
 
