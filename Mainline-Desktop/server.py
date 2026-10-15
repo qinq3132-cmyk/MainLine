@@ -26,6 +26,8 @@ import uuid
 import webbrowser
 from documents import extract as extract_document, MAX_BYTES as MAX_FILE_BYTES
 from llm_config import LLMConfig
+from serverchan import DAILY_LIMIT, ServerChanConfig, send as send_serverchan
+import background_reminders
 
 ROOT = Path(__file__).resolve().parent
 if getattr(sys, 'frozen', False):
@@ -394,6 +396,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS focus(id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS goals(id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS files(id TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS push_attempts(id TEXT PRIMARY KEY, day TEXT NOT NULL, data TEXT NOT NULL);
             ''')
             if not db.execute("SELECT 1 FROM settings WHERE key='initialized'").fetchone():
                 for i, area in enumerate(AREAS):
@@ -611,6 +614,37 @@ class Store:
             target.commit()
         return dest.name
 
+    def push_status(self, day):
+        with self.lock, self.connect() as db:
+            rows = [json.loads(row[0]) for row in db.execute(
+                'SELECT data FROM push_attempts WHERE day=? ORDER BY rowid', (day,))]
+        return {'used_today': len(rows), 'daily_limit': DAILY_LIMIT,
+                'last_result': rows[-1]['result'] if rows else ''}
+
+    def reserve_push(self, day, notification_ids):
+        """Reserve before HTTP: even failed/uncertain requests consume our local budget."""
+        if not notification_ids:
+            return None
+        with self.lock, self.connect() as db:
+            db.execute('BEGIN IMMEDIATE')
+            rows = [json.loads(row[0]) for row in db.execute('SELECT data FROM push_attempts')]
+            used = sum(row['day'] == day for row in rows)
+            already = {item for row in rows for item in row.get('notification_ids', [])}
+            fresh = [item for item in notification_ids if item not in already][:20]
+            if used >= DAILY_LIMIT or not fresh:
+                return None
+            record = {'id': uid(), 'day': day, 'notification_ids': fresh,
+                      'attempted_at': stamp(), 'result': 'attempted'}
+            db.execute('INSERT INTO push_attempts VALUES(?,?,?)',
+                       (record['id'], day, json.dumps(record, ensure_ascii=False)))
+        return record
+
+    def finish_push(self, record, success):
+        record = {**record, 'result': 'sent' if success else 'failed'}
+        with self.lock, self.connect() as db:
+            db.execute('UPDATE push_attempts SET data=? WHERE id=?',
+                       (json.dumps(record, ensure_ascii=False), record['id']))
+
     def goal(self, data, item_id=None):
         with self.lock:
             old = self.get('goals', item_id) if item_id else {}
@@ -677,7 +711,7 @@ class Store:
 
     def export(self):
         return {'format': 'personal-desk', 'version': 1, 'exported_at': stamp(),
-                **{k: self.all(k) for k in ['projects', 'tasks', 'focus', 'goals']},
+                **{k: self.all(k) for k in ['projects', 'tasks', 'focus', 'goals', 'messages', 'notifications', 'jobs']},
                 'files': [{k: v for k, v in f.items() if k != 'stored_filename'} for f in self.all('files')],
                 'settings': self.settings()}
 
@@ -686,6 +720,9 @@ class Store:
             raise ValueError('不是有效的个人指挥台备份。')
         projects, tasks, focus = data.get('projects'), data.get('tasks'), data.get('focus', [])
         goals, files = data.get('goals', self.all('goals')), data.get('files', self.all('files'))
+        messages = data.get('messages', self.all('messages'))
+        notifications = data.get('notifications', self.all('notifications'))
+        jobs = data.get('jobs', self.all('jobs'))
         if not isinstance(projects, list) or not isinstance(tasks, list) or not isinstance(focus, list) or len(tasks) > 10000:
             raise ValueError('备份数据格式或大小不正确。')
         project_ids = {p.get('id') for p in projects if isinstance(p, dict)}
@@ -718,12 +755,17 @@ class Store:
         settings = self.save_settings(settings, commit=False)
         if any(not isinstance(f, dict) or not isinstance(f.get('id'), str) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', f['id']) for f in focus):
             raise ValueError('专注记录格式无效。')
-        for records in [goals, files]:
-            if not isinstance(records, list) or len(records) > 2000 or len({r.get('id') for r in records if isinstance(r, dict)}) != len(records):
-                raise ValueError('目标或文件备份格式无效。')
+        for records, limit in [(goals, 2000), (files, 2000), (messages, 100000),
+                               (notifications, 100000), (jobs, 100000)]:
+            if not isinstance(records, list) or len(records) > limit or len({r.get('id') for r in records if isinstance(r, dict)}) != len(records):
+                raise ValueError('备份记录格式无效。')
             for record in records:
                 if not isinstance(record, dict) or not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', str(record.get('id') or '')):
-                    raise ValueError('目标或文件编号无效。')
+                    raise ValueError('备份记录编号无效。')
+        if any(not isinstance(m.get('role'), str) or not isinstance(m.get('content'), str) for m in messages):
+            raise ValueError('聊天备份内容无效。')
+        if any(not isinstance(n.get('title'), str) or not isinstance(n.get('body'), str) for n in notifications):
+            raise ValueError('提醒备份内容无效。')
         for g in goals:
             if not g.get('title') or g.get('status') not in {'active', 'paused', 'completed'} or g.get('review_days') not in {7,14,30,90}:
                 raise ValueError('目标备份内容无效。')
@@ -741,12 +783,13 @@ class Store:
         with self.lock:
             saved = self.backup()
             with self.connect() as db:
-                for table, records in [('projects', clean_projects), ('tasks', clean_tasks), ('focus', focus), ('goals', goals), ('files', files)]:
+                for table, records in [('projects', clean_projects), ('tasks', clean_tasks), ('focus', focus), ('goals', goals), ('files', files),
+                                       ('messages', messages), ('notifications', notifications), ('jobs', jobs)]:
                     db.execute(f'DELETE FROM {table}')
                     db.executemany(f'INSERT INTO {table} VALUES(?,?)', [(r['id'], json.dumps(r, ensure_ascii=False)) for r in records])
-                db.execute('DELETE FROM notifications')
                 db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)', ('preferences', json.dumps(settings)))
-        return {'backup': saved, 'tasks': len(tasks), 'projects': len(projects), 'goals': len(goals), 'files': len(files)}
+        return {'backup': saved, 'tasks': len(tasks), 'projects': len(projects), 'goals': len(goals),
+                'files': len(files), 'messages': len(messages), 'notifications': len(notifications), 'jobs': len(jobs)}
 
 
 def build_plan(tasks, settings, start_date, days=7, selected_ids=None):
@@ -825,6 +868,7 @@ def build_plan(tasks, settings, start_date, days=7, selected_ids=None):
 class Assistant:
     def __init__(self, store, models):
         self.store, self.models = store, models
+        self.serverchan = ServerChanConfig(store.dir / 'serverchan-config.json')
         self.pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix='secretary')
         self.stop = threading.Event()
         self.lock = threading.Lock()
@@ -838,6 +882,23 @@ class Assistant:
         return {'now': stamp(), 'timezone': 'Asia/Shanghai', 'projects': projects, 'tasks': tasks[:250],
                 'long_term_goals': [g for g in state.get('goals', []) if not g.get('deleted_at') and g['status']=='active'],
                 'schedule_preferences': {k: v for k, v in state['settings'].items() if k not in {'model', 'last_review_date'}}}
+
+    def related_memories(self, query):
+        """Recall a small, relevant slice of saved conversations without truncating storage."""
+        records = [m for m in self.store.all('messages') if m.get('role') in {'user', 'assistant'}]
+        query = query[:500]
+        terms = {query[i:i+2] for i in range(max(0, len(query)-1)) if not query[i:i+2].isspace()}
+        older = records[:-12]
+        scored = []
+        for index, message in enumerate(older):
+            content = str(message.get('content') or '')
+            score = sum(term in content for term in terms)
+            if score:
+                scored.append((score, index, message))
+        relevant = [m for _, _, m in sorted(scored, reverse=True)[:8]]
+        selected = sorted(relevant + records[-12:], key=lambda m: m.get('created_at', ''))
+        return [{'role': m['role'], 'content': str(m.get('content') or '')[:1200],
+                 'job_id': m.get('job_id', ''), 'at': m.get('created_at', '')} for m in selected]
 
     def submit(self, mode, text='', model_id='', automatic=False, file_ids=None):
         if mode not in {'capture', 'review', 'chat', 'test'}:
@@ -858,6 +919,11 @@ class Assistant:
                'automatic': automatic, 'created_at': stamp()}
         job['file_ids'] = file_ids
         self.store.put('jobs', job)
+        if mode in {'capture', 'chat'}:
+            names = [self.store.get('files', fid)['name'] for fid in file_ids]
+            content = text + ('\n附件：' + '、'.join(names) if names else '')
+            self.store.put('messages', {'id': uid(), 'role': 'user', 'mode': mode,
+                                        'content': content, 'job_id': job['id'], 'created_at': stamp()})
         self.pool.submit(self.run, job)
         return {'id': job['id'], 'status': 'running'}
 
@@ -887,9 +953,8 @@ updates 为建议更新已有事项，每项为 {"id":"已有ID","changes":{...�
                 context = json.dumps(self.context(), ensure_ascii=False)
                 history = []
                 if mode == 'chat':
-                    for m in self.store.all('messages')[-10:]:
-                        if m.get('mode') == 'chat' and m.get('role') in {'user', 'assistant'}:
-                            history.append({'role': m['role'], 'content': m['content'][:3000]})
+                    history = [{'role': m['role'], 'content': m['content']}
+                               for m in self.related_memories(job['text']) if m.get('job_id') != job['id']]
                 text = job['text'] or ('请根据附件梳理我需要推进的事项和安排。' if job.get('file_ids') else '请回顾当前项目和安排，指出我需要介入的事项和建议的下一步。')
                 attachment_parts, remaining = [], 60000
                 for fid in job.get('file_ids', []):
@@ -919,8 +984,6 @@ updates 为建议更新已有事项，每项为 {"id":"已有ID","changes":{...�
                 result['updates'] = [u for u in result['updates'][:20] if isinstance(u, dict) and u.get('id') in existing_ids
                                      and isinstance(u.get('changes'), dict)]
                 result['warnings'] = warnings
-                visible_text = text + ('\n附件：' + '、'.join(f['name'] for f in attachment_parts) if attachment_parts else '')
-                self.store.put('messages', {'id': uid(), 'role': 'user', 'mode': mode, 'content': visible_text, 'created_at': stamp()})
                 self.store.put('messages', {'id': uid(), 'role': 'assistant', 'mode': mode, 'content': result['summary'],
                                             'job_id': job['id'], 'created_at': stamp()})
             self.store.put('jobs', {**job, 'status': 'done', 'result': result, 'usage': usage, 'finished_at': stamp(), 'applied': []})
@@ -939,6 +1002,45 @@ updates 为建议更新已有事项，每项为 {"id":"已有ID","changes":{...�
         if not self.store.get('notifications', identity):
             self.store.put('notifications', {'id': identity, 'title': title, 'body': body,
                                              'task_id': task_id, 'job_id': job_id, 'goal_id': goal_id, 'read': False, 'created_at': stamp()})
+
+    def serverchan_status(self):
+        return {**self.serverchan.public(), **self.store.push_status(now().date().isoformat())}
+
+    def flush_push(self):
+        config = self.serverchan.load()
+        if not config['enabled'] or not config['sendkey']:
+            return False
+        day = now().date().isoformat()
+        active = {t['id'] for t in self.store.all('tasks') if not t.get('deleted_at') and t['status'] in ACTIVE}
+        allowed = ('start-', 'due-', 'follow-', 'overdue-')
+        cutoff = max(day + 'T00:00:00', config['enabled_at'])
+        pending = [n for n in self.store.all('notifications') if n['id'].startswith(allowed) and not n.get('read')
+                   and n.get('created_at', '') >= cutoff and n.get('task_id') in active]
+        reservation = self.store.reserve_push(day, [n['id'] for n in pending])
+        if not reservation:
+            return False
+        chosen = [n for n in pending if n['id'] in reservation['notification_ids']]
+        count = len(chosen)
+        if count == 1:
+            title = '主线提醒：' + (chosen[0]['body'] if config['include_titles'] else chosen[0]['title'])
+        else:
+            title = f'主线提醒：{count} 项需要处理'
+        lines = [f"- {n['title']}：{n['body'] if config['include_titles'] else '请打开主线查看'}" for n in chosen]
+        success = send_serverchan(config['sendkey'], title, '\n'.join(lines))
+        self.store.finish_push(reservation, success)
+        return success
+
+    def test_push(self):
+        config = self.serverchan.load()
+        if not config['sendkey']:
+            raise ValueError('请先保存 SendKey。')
+        day = now().date().isoformat()
+        reservation = self.store.reserve_push(day, ['test-' + uid()])
+        if not reservation:
+            raise ValueError('今天的 5 次发送额度已用完。')
+        success = send_serverchan(config['sendkey'], '主线提醒：连接测试', '测试消息已从你的电脑发出。')
+        self.store.finish_push(reservation, success)
+        return {'sent': success, **self.serverchan_status()}
 
     def tick(self, allow_ai=True):
         today = now().date().isoformat()
@@ -976,6 +1078,7 @@ updates 为建议更新已有事项，每项为 {"id":"已有ID","changes":{...�
         while not self.stop.wait(60):
             try:
                 self.tick()
+                self.flush_push()
             except Exception:
                 pass
 
@@ -1046,6 +1149,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     return self.send_json(200, self.server.models.public())
                 if path == '/api/llm-config':
                     return self.send_json(200, self.server.models.public_config())
+                if path == '/api/serverchan-config':
+                    return self.send_json(200, {**self.server.assistant.serverchan_status(),
+                                                'background_enabled': background_reminders.enabled()})
                 if path == '/api/areas':
                     return self.send_json(200, {'areas': self.server.store.settings().get('areas', AREAS)})
                 if path == '/api/export':
@@ -1117,6 +1223,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = self.server.models.save_config(data)
                 store.save_settings({'model': result['default']})
                 return self.send_json(200, result)
+            if path == '/api/serverchan-config' and method == 'POST':
+                assistant.serverchan.save(data, stamp())
+                return self.send_json(200, assistant.serverchan_status())
+            if path == '/api/serverchan-test' and method == 'POST':
+                return self.send_json(200, assistant.test_push())
+            if path == '/api/background-reminders' and method == 'POST':
+                if type(data.get('enabled')) is not bool:
+                    raise ValueError('后台提醒设置格式不正确。')
+                if data['enabled'] and not assistant.serverchan.load()['sendkey']:
+                    raise ValueError('请先配置 Server酱 SendKey。')
+                if not getattr(sys, 'frozen', False):
+                    raise ValueError('后台提醒需要从 Windows EXE 客户端启用。')
+                return self.send_json(200, {'background_enabled': background_reminders.configure(sys.executable, data['enabled'])})
             if path == '/api/goals' and method == 'POST':
                 return self.send_json(201, store.goal(data))
             if path.startswith('/api/goals/'):

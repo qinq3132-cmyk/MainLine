@@ -8,6 +8,8 @@
 *.log
 llm-config.json
 llm-config.local.json
+serverchan-config.json
+.serverchan-*.tmp
 .llm-*.tmp
 opencode.json
 opencode.jsonc

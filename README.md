@@ -14,12 +14,13 @@ Mainline 是一个本地运行的可视化个人秘书：四象限管理、两�
 - **文件**：读取 Word `.docx`、PPT `.pptx`、PDF、Excel `.xlsx` 和文本，依据文字整理行动。
 - **排期与专注**：保留固定安排、深度工作和缓冲，记录真实专注时间。
 - **本地保存**：SQLite、导出/恢复、数据库备份。
+- **微信提醒**：可选 Server酱 Turbo，提醒合并发送，按免费额度每天最多 5 次尝试；可开启 Windows 关窗后定时检查。
 
 ## Windows 下载安装
 
-**[下载最新版单文件 Mainline.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15.exe)**（Windows 64 位，2026-10-15）。下载后将 EXE 放在自己选择的文件夹，双击运行；无需安装 Python，也无需下载源码。它是免安装桌面版，不是 Setup 安装器。首次启动可能稍慢。
+**[下载最新版单文件 Mainline.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v2.exe)**（Windows 64 位，2026-10-15 更新版）。下载后将 EXE 放在自己选择的文件夹，双击运行；无需安装 Python，也无需下载源码。它是免安装桌面版，不是 Setup 安装器。首次启动可能稍慢。
 
-关闭旧版窗口后再运行新版。程序数据默认保存在 `%LOCALAPPDATA%\Mainline\data`，更新 EXE 不会重置任务和设置。模型 API Key **不包含在下载包中**，请在程序的“偏好与数据 → 模型连接”中自行配置。详细步骤、升级方法和校验值见[Windows EXE 安装说明](Mainline-Desktop/Windows-EXE-安装.md)。
+关闭旧版窗口后再运行新版。聊天、日程、任务等记录默认保存在 `%LOCALAPPDATA%\Mainline\data`，更新 EXE 不会重置这些记录，首次运行新版本还会自动备份数据库。模型 API Key 和 Server酱 SendKey **都不包含在下载包中**，请在程序的“偏好与数据”中自行配置。详细步骤、旧网页数据迁移方法和校验值见[Windows EXE 安装说明](Mainline-Desktop/Windows-EXE-安装.md)。
 
 如需保留文件夹版，可使用[桌面版源码和说明](Mainline-Desktop/README.md)自行构建。单文件版与文件夹版使用同一个本地数据目录。
 
@@ -84,8 +85,8 @@ python personal-desk/server.py --open-browser
 ## 数据与隐私
 
 - 每位用户自行提供 API 凭据，仓库仅包含占位示例。
-- 网页源码版的数据默认在 `personal-desk/data/`；桌面 EXE 版默认在 `%LOCALAPPDATA%\Mainline\data`。独立密钥配置跟随各自的数据目录，`MAINLINE_CONFIG` 可单独指定位置。
-- 密钥只供后台调用，不写入任务数据库、任务导出或接口返回；配置文件存储在本机，**并非加密保险箱**，请使用自己的用户目录并妥善保管。
+- 网页源码版的数据默认在 `personal-desk/data/`；桌面 EXE 版默认在 `%LOCALAPPDATA%\Mainline\data`。旧网页数据在桌面版首次运行且目标数据目录为空时可安全复制，原目录保留。独立密钥配置跟随各自的数据目录，`MAINLINE_CONFIG` 可单独指定位置。
+- 密钥只供后台调用，不写入任务数据库、任务导出或接口返回；配置文件存储在本机，**并非加密保险箱**，请使用自己的用户目录并妥善保管。聊天输入、日程及相关记录会保存在本地数据库，JSON 导出也包含聊天；附件原件需要复制整个数据目录。
 - AI 请求会向你选定的服务发送相关任务、目标、输入和本次选择的附件文字。没有模型配置时，本地管理和手动安排仍可使用。
 - 网页不加载外部字体、脚本或图片。服务只监听 `127.0.0.1`。
 - 忽略规则排除数据目录、密钥配置、环境文件、日志与本地测试产物。分享备份或复制整个数据目录时，应另行检查其中内容。

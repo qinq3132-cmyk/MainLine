@@ -206,7 +206,18 @@ async function openSettings() {
   $('#workday-picks').innerHTML=[...'一二三四五六日'].map((d,i)=>`<label><input type="checkbox" name="workday" value="${i}" ${state.settings.workdays.includes(i)?'checked':''}>周${d}</label>`).join('');
   renderAreasEditor();$('#areas-error').textContent='';
   await loadLLMProfile();
+  await loadServerChanProfile();
   openDialog('settings-dialog');
+}
+async function loadServerChanProfile() {
+  $('#serverchan-error').textContent='';$('#serverchan-key').value='';$('#serverchan-clear').checked=false;
+  try {const profile=await api('/api/serverchan-config');
+    $('#serverchan-enabled').checked=profile.enabled;$('#serverchan-titles').checked=profile.include_titles;
+    $('#serverchan-key').placeholder=profile.configured?'已保存，留空保留':'粘贴以 SCT 开头的 SendKey';
+    $('#background-reminders-button').textContent=profile.background_enabled?'关闭关窗后提醒':'开启关窗后提醒';
+    $('#background-reminders-button').dataset.enabled=profile.background_enabled?'true':'false';
+    $('#serverchan-status').textContent=`${profile.configured?'SendKey 已保存在本机':'尚未配置 SendKey'} · 今日已用 ${profile.used_today}/${profile.daily_limit} 次${profile.last_result==='failed'?' · 上次发送失败，未自动重试':''}`;
+  } catch(error) {$('#serverchan-error').textContent=error.message;}
 }
 async function loadLLMProfile() {
   $('#model-config-status').textContent=`${modelInfo.source||'模型'} · ${modelInfo.models.filter(m=>m.configured).length} 个可用模型`;
@@ -320,6 +331,21 @@ async function action(name, button) {
     button.disabled=true;$('#llm-config-error').textContent='';
     try{modelInfo=await api('/api/llm-config','POST',{provider_name:$('#llm-provider').value,base_url:$('#llm-base').value,models:$('#llm-models').value.split('\n').map(s=>s.trim()).filter(Boolean),api_key:$('#llm-key').value.trim(),clear_api_key:$('#llm-clear-key').checked,use_opencode:$('#llm-opencode').checked});$('#llm-key').value='';state.settings.model=modelInfo.default;renderModels();await loadLLMProfile();toast('模型配置已保存');}catch(error){$('#llm-config-error').textContent=error.message;}finally{button.disabled=false;}return;
   }
+  if(name==='save-serverchan'){
+    button.disabled=true;$('#serverchan-error').textContent='';
+    try {await api('/api/serverchan-config','POST',{sendkey:$('#serverchan-key').value.trim(),enabled:$('#serverchan-enabled').checked,include_titles:$('#serverchan-titles').checked,clear_sendkey:$('#serverchan-clear').checked});await loadServerChanProfile();toast('微信提醒设置已保存');}
+    catch(error){$('#serverchan-error').textContent=error.message;}finally{button.disabled=false;}return;
+  }
+  if(name==='test-serverchan'){
+    button.disabled=true;$('#serverchan-error').textContent='';
+    try {const result=await api('/api/serverchan-test','POST',{});await loadServerChanProfile();toast(result.sent?'测试消息已提交到 Server酱':'发送失败；本次请求仍占用今日额度',!result.sent);}
+    catch(error){$('#serverchan-error').textContent=error.message;}finally{button.disabled=false;}return;
+  }
+  if(name==='toggle-background-reminders'){
+    button.disabled=true;$('#serverchan-error').textContent='';
+    try {const enable=button.dataset.enabled!=='true';await api('/api/background-reminders','POST',{enabled:enable});await loadServerChanProfile();toast(enable?'关窗后提醒已开启':'关窗后提醒已关闭');}
+    catch(error){$('#serverchan-error').textContent=error.message;}finally{button.disabled=false;}return;
+  }
   if(name==='select-proposals'){$$('input[name=proposal]:not(:disabled)').forEach(c=>c.checked=true);return;}
   if(name==='edit-proposal'){const t=currentJob.result.tasks[Number(button.dataset.index)];return openTask(null,t);}
   if(name==='apply-proposals'){const selected=$$('input[name=proposal]:checked:not(:disabled)').map(c=>c.value);if(!selected.length)return toast('请至少选择一项建议。');button.disabled=true;try{const r=await api('/api/ai/apply','POST',{job_id:currentJob.id,selected});currentJob=await api('/api/jobs/'+currentJob.id);await refresh();renderAI();toast(`已应用 ${r.applied.length} 项建议`);if(r.skipped.length)$('#ai-status').textContent=r.skipped.map(s=>s.reason).join('\n');}finally{button.disabled=false;}return;}
@@ -341,7 +367,7 @@ async function action(name, button) {
   if(name==='read-notifications'){await api('/api/notifications/read','POST',{all:true});await refresh();return renderNotifications();}
   if(name==='notification-task'||name==='notification-job'||name==='notification-goal'){await api('/api/notifications/read','POST',{id:button.dataset.notification});closeDialog('notifications-dialog');await refresh();return action(name==='notification-task'?'edit-task':name==='notification-goal'?'review-goal':'open-job',button);}
   if(name==='desktop-notifications'){if(!('Notification'in window))return toast('当前浏览器不支持桌面提醒。',true);const permission=await Notification.requestPermission();return toast(permission==='granted'?'桌面提醒已开启；网页保持打开时可以收到。':'尚未允许桌面提醒，页内提醒仍然可用。');}
-  if(name==='export'){const data=await api('/api/export'),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='主线-'+state.today+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return toast('已导出任务、项目和偏好。');}
+  if(name==='export'){const data=await api('/api/export'),blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download='主线-'+state.today+'.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);return toast('已导出聊天、事项、日程和项目等记录。');}
   if(name==='backup'){const r=await api('/api/backup','POST',{});return toast('本机数据库备份已保存：'+r.filename);}
   if(name==='save-areas'){const areas=$('#areas-editor').value.split('\n').map(x=>x.trim()).filter(Boolean);try{await api('/api/areas','POST',{areas});state.settings.areas=areas;fillAreaOptions();$('#areas-error').textContent='';return toast('领域已保存，新建项目和目标时可以使用。');}catch(e){$('#areas-error').textContent=e.message;return;}}
   if(name==='start-focus'){if(focusSession&&!confirm('已有专注进行中，先结束并记录，再开始这项？'))return;if(focusSession)await finishFocus();const t=await saveTask(true);if(!t)return;focusSession={id:crypto.randomUUID(),taskId:t.id,title:t.title,target:t.duration,elapsed:0,resumedAt:Date.now(),running:true,notified:false};persistFocus();renderFocus();$('#focus-bar').scrollIntoView({block:'nearest',behavior:'smooth'});return;}
