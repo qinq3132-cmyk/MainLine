@@ -2,22 +2,30 @@
 
 把科研、创业和生活放在同一个个人工作台里，让重要的事持续向前。
 
-Mainline 是一个本地运行的可视化个人秘书：四象限管理、项目进度、长期目标、周/月安排、文件整理与 AI 辅助排期。数据保存在使用者自己的电脑上。
+Mainline 是一个本地运行的可视化个人秘书：四象限管理、两级项目、长期成长、周/月安排、文件整理与 AI 辅助排期。数据保存在使用者自己的电脑上。
 
 ## 功能
 
 - **四象限**：按重要、紧急划分事项，支持拖动、完成、编辑与回收站。
-- **项目**：目标、里程碑、等待他人和下一步行动。
-- **长期目标**：愿景、每周投入、定期回顾、关联任务与首页提醒。
+- **项目**：先按通信组等类别浏览，再查看具体项目的负责人、进度、里程碑和任务；聚餐等活动无需进度。
+- **长期成长**：将长期目标与持续投入放在一起，支持定期回顾、关联任务与首页提醒。
 - **周与月**：查看会议、约饭、时间块、截止日期和重复安排。
 - **AI 秘书**：自然语言梳理、进度回顾、计划讨论；建议经过选择后才应用。
 - **文件**：读取 Word `.docx`、PPT `.pptx`、PDF、Excel `.xlsx` 和文本，依据文字整理行动。
 - **排期与专注**：保留固定安排、深度工作和缓冲，记录真实专注时间。
 - **本地保存**：SQLite、导出/恢复、数据库备份。
 
-## 快速开始
+## Windows 下载安装
 
-需要 Python 3.11 或更新版本，以及现代浏览器。运行不需要 Node.js。
+**[下载最新版单文件 Mainline.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15.exe)**（Windows 64 位，2026-10-15）。下载后将 EXE 放在自己选择的文件夹，双击运行；无需安装 Python，也无需下载源码。它是免安装桌面版，不是 Setup 安装器。首次启动可能稍慢。
+
+关闭旧版窗口后再运行新版。程序数据默认保存在 `%LOCALAPPDATA%\Mainline\data`，更新 EXE 不会重置任务和设置。模型 API Key **不包含在下载包中**，请在程序的“偏好与数据 → 模型连接”中自行配置。详细步骤、升级方法和校验值见[Windows EXE 安装说明](Mainline-Desktop/Windows-EXE-安装.md)。
+
+如需保留文件夹版，可使用[桌面版源码和说明](Mainline-Desktop/README.md)自行构建。单文件版与文件夹版使用同一个本地数据目录。
+
+## 从源码运行网页版本
+
+只有从源码运行网页版本时，才需要 Python 3.11 或更新版本及现代浏览器；运行不需要 Node.js。
 
 ```powershell
 git clone https://github.com/qinq3132-cmyk/MainLine.git
@@ -76,7 +84,7 @@ python personal-desk/server.py --open-browser
 ## 数据与隐私
 
 - 每位用户自行提供 API 凭据，仓库仅包含占位示例。
-- 任务、目标、附件、备份在 `personal-desk/data/`；独立密钥配置也保存在这里，使用 `--data-dir` 时跟随该目录，`MAINLINE_CONFIG` 可单独指定位置。
+- 网页源码版的数据默认在 `personal-desk/data/`；桌面 EXE 版默认在 `%LOCALAPPDATA%\Mainline\data`。独立密钥配置跟随各自的数据目录，`MAINLINE_CONFIG` 可单独指定位置。
 - 密钥只供后台调用，不写入任务数据库、任务导出或接口返回；配置文件存储在本机，**并非加密保险箱**，请使用自己的用户目录并妥善保管。
 - AI 请求会向你选定的服务发送相关任务、目标、输入和本次选择的附件文字。没有模型配置时，本地管理和手动安排仍可使用。
 - 网页不加载外部字体、脚本或图片。服务只监听 `127.0.0.1`。
@@ -87,6 +95,8 @@ python personal-desk/server.py --open-browser
 ## 文档与开发
 
 - [完整使用说明](personal-desk/README.md)
+- [桌面版使用说明](Mainline-Desktop/README.md)
+- [Windows EXE 安装与升级](Mainline-Desktop/Windows-EXE-安装.md)
 - [Windows EXE 打包指南](personal-desk/Windows-EXE-打包指南.md)
 
 ```powershell
