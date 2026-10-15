@@ -2,7 +2,7 @@
 
 ## 直接下载
 
-1. 点击[下载 Mainline-2026-10-15-v5.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v5.exe)。这是 Windows 64 位单文件桌面版，下载后即可运行，不需要 Python 或源码。
+1. 点击[下载 Mainline-2026-10-15-v6.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v6.exe)。这是 Windows 64 位单文件桌面版，下载后即可运行，不需要 Python 或源码。v6 修复了窗口启动时的卡死问题。
 2. 把 EXE 放在自己选择的固定文件夹，例如“文档”中的 `Mainline` 文件夹，然后双击打开。它是免安装版，不需要运行安装向导。首次打开可能因解压运行库而稍慢。
 3. 在“偏好与数据 → 模型连接”中填写自己的模型服务地址、模型 ID 和 API Key。不配置模型时，本地任务和项目管理仍可使用。
 4. 如需微信提醒，在[Server酱官网](https://sct.ftqq.com/docs/getting-started/sendkey/)用微信获取 Turbo SendKey，进入“偏好与数据 → 手机微信提醒”，填入 SendKey 并开启。可按需点击“开启关窗后提醒”；电脑保持开机和登录时，Windows 会每 5 分钟检查一次。
@@ -24,7 +24,7 @@ JSON 导出现在包含聊天、日程事项、提醒、项目、目标、笔记
 本次发布文件的 SHA-256：
 
 ```text
-2238E5258CAD2D13EB380C84E2242E57865983AF5DED6A2F250F5069259EE00A
+C8BB8B5690857D014E167845B094D948AB97A155619BD093CECB8C1DA1D8C4CB
 ```
 
-可在 PowerShell 中运行 `Get-FileHash .\Mainline-2026-10-15-v5.exe -Algorithm SHA256` 核对下载文件。发布包不包含开发者的 API Key、SendKey、本机任务数据库或附件。
+可在 PowerShell 中运行 `Get-FileHash .\Mainline-2026-10-15-v6.exe -Algorithm SHA256` 核对下载文件。发布包不包含开发者的 API Key、SendKey、本机任务数据库或附件。

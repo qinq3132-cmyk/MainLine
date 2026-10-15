@@ -5,6 +5,8 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from types import SimpleNamespace
+from unittest.mock import Mock
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -122,6 +124,17 @@ class ServerChanMemoryTests(unittest.TestCase):
         self.assertEqual(server.Store(target).all('messages')[0]['content'], '我的日程')
         self.assertEqual(len(list((target / 'backups').glob('before-update-*.sqlite3'))), 1)
         self.assertEqual(self.store.all('messages')[0]['content'], '我的日程')
+
+    def test_folder_picker_bridge_does_not_expose_native_window(self):
+        bridge = desktop.DesktopBridge()
+        window = Mock()
+        window.create_file_dialog.return_value = ['F:\\project-folder']
+        bridge._window = window
+        self.assertFalse(any(not key.startswith('_') for key in vars(bridge)))
+        fake_webview = SimpleNamespace(FileDialog=SimpleNamespace(FOLDER='folder'))
+        with patch.dict(sys.modules, {'webview': fake_webview}):
+            self.assertEqual(bridge.choose_folder(), 'F:\\project-folder')
+        window.create_file_dialog.assert_called_once_with('folder')
 
     def test_serverchan_api_never_returns_sendkey(self):
         http = server.DeskServer(('127.0.0.1', 0), self.store, FakeModels())

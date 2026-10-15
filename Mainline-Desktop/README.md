@@ -4,7 +4,7 @@
 
 ## 打开和停止
 
-可从 GitHub [直接下载单文件 EXE](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v5.exe)，放到自己选择的文件夹后双击运行；无需安装 Python。详细步骤见 [Windows EXE 安装说明](Windows-EXE-安装.md)。它是免安装桌面版，不是 Setup 安装器。
+可从 GitHub [直接下载单文件 EXE](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v6.exe)，放到自己选择的文件夹后双击运行；无需安装 Python。详细步骤见 [Windows EXE 安装说明](Windows-EXE-安装.md)。它是免安装桌面版，不是 Setup 安装器。v6 修复了打开窗口后可能卡死的问题。
 
 本机验收过的文件夹版位于 `release/2026-10-15/Mainline/Mainline.exe`。使用文件夹版时必须保留同目录的 `_internal` 文件夹；不要只复制其中的 EXE。
 

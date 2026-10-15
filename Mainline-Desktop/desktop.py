@@ -28,7 +28,7 @@ import server as backend  # noqa: E402
 import background_reminders  # noqa: E402
 
 APP_NAME = 'Mainline'
-APP_DATA_VERSION = '2026-10-15-v5'
+APP_DATA_VERSION = '2026-10-15-v6'
 DEFAULT_PORT = 5179
 
 
@@ -142,13 +142,15 @@ def setup_error_log(data_dir: Path) -> None:
 
 class DesktopBridge:
     def __init__(self):
-        self.window = None
+        # pywebview walks every public attribute of js_api. Keep the native
+        # Window private so it cannot recursively inspect the entire GUI.
+        self._window = None
 
     def choose_folder(self):
-        if self.window is None:
+        if self._window is None:
             return ''
         import webview
-        selected = self.window.create_file_dialog(webview.FileDialog.FOLDER)
+        selected = self._window.create_file_dialog(webview.FileDialog.FOLDER)
         return str(selected[0]) if selected else ''
 
 
@@ -221,25 +223,7 @@ def main() -> int:
 
     bridge = DesktopBridge()
     window = webview.create_window(APP_NAME, url, width=1280, height=860, min_size=(960, 640), js_api=bridge)
-    bridge.window = window
-
-    def reload_when_ready():
-        # WebView2 can finish creating the window before the HTTP service accepts
-        # its first request; retry loading so the user never sees an error page.
-        for _ in range(50):
-            if window.events.loaded.is_set():
-                return
-            try:
-                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-                req = urllib.request.Request(url + '/api/health', headers={'Host': f'127.0.0.1:{port}'})
-                with opener.open(req, timeout=1.5) as response:
-                    if response.status == 200:
-                        window.load_url(url)
-                        return
-            except Exception:
-                time.sleep(0.3)
-
-    threading.Thread(target=reload_when_ready, daemon=True).start()
+    bridge._window = window
     webview.start()
     # 关闭窗口 → 安全停止后台
     srv.assistant.stop.set()
