@@ -377,12 +377,41 @@ class ApiTests(unittest.TestCase):
         history=self.store.all('messages')
         self.assertEqual(len(history),1)
         self.assertEqual(history[0]['mode'],'application')
-        self.assertIn('新增：新任务',history[0]['content'])
+        self.assertIn('新增事项：新任务',history[0]['content'])
         self.assertIn('未应用',history[0]['content'])
         second=self.request('/api/ai/apply','POST',{'job_id':job['id'],'selected':['task:0']})
         self.assertEqual(second['applied'],[])
         self.assertEqual(len(self.store.all('messages')),1)
         self.assertEqual(self.store.get('tasks',fixed['id'])['scheduled_at'],day+'T10:00')
+
+    def test_ai_project_proposal_creates_project_and_links_its_task(self):
+        job={'id':'project-job','status':'done','applied':[],
+             'result':{'projects':[{'name':'示例研究项目','area':'通信组','owner':'示例负责人',
+                                    'goal':'验证方案','project_type':'project'}],
+                       'tasks':[{'title':'整理实验计划','project_id':'','project_name':'示例研究项目'}],
+                       'updates':[]}}
+        self.store.put('jobs',job)
+        result=self.request('/api/ai/apply','POST',{'job_id':job['id'],'selected':['task:0','project:0']})
+        self.assertTrue(result['archived'])
+        self.assertEqual(len(result['created_projects']),1)
+        self.assertEqual(len(result['created_tasks']),1)
+        project=self.store.get('projects',result['created_projects'][0])
+        task=self.store.get('tasks',result['created_tasks'][0])
+        self.assertEqual((project['name'],project['area'],project['owner']),('示例研究项目','通信组','示例负责人'))
+        self.assertEqual(task['project_id'],project['id'])
+        self.assertIn('新建项目：示例研究项目',self.store.all('messages')[0]['content'])
+
+    def test_ai_apply_keeps_unapplied_proposal_visible_with_reason(self):
+        existing=self.store.project({'name':'示例研究项目','area':'通信组'})
+        job={'id':'duplicate-project-job','status':'done','applied':[],
+             'result':{'projects':[{'name':existing['name'],'area':existing['area'],'project_type':'project'}],
+                       'tasks':[],'updates':[]}}
+        self.store.put('jobs',job)
+        result=self.request('/api/ai/apply','POST',{'job_id':job['id'],'selected':['project:0']})
+        self.assertFalse(result['archived'])
+        self.assertEqual(result['applied'],[])
+        self.assertIn('同名项目',result['skipped'][0]['reason'])
+        self.assertFalse(self.store.get('jobs',job['id']).get('archived_at'))
 
     def test_reminder_deduplication(self):
         t=self.request('/api/tasks','POST',{'title':'检查学生结果','followup_date':server.now().date().isoformat(),'status':'waiting'})

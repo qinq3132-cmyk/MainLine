@@ -37,7 +37,8 @@
     <div class="assistant-header"><span class="assistant-orb" aria-hidden="true">✦</span><div><h2>个人秘书</h2><p>梳理事情，也跟进下一步</p></div><button class="icon-button mobile-close" data-action="toggle-assistant" aria-label="收起秘书">×</button></div>
     <label class="model-label" for="ai-model">秘书模型</label><select id="ai-model" aria-label="秘书模型"></select>
     <div class="assistant-modes" role="group" aria-label="秘书操作"><button data-mode="capture" class="active">整理事情</button><button data-mode="review">回顾推进</button><button data-mode="chat">讨论计划</button></div>
-    <label class="sr-only" for="ai-input">告诉秘书需要处理的事情</label><textarea id="ai-input" rows="5" placeholder="说说你的安排，或添加文件。"></textarea>
+    <label class="sr-only" for="ai-input">告诉秘书需要处理的事情</label><textarea id="ai-input" rows="5" placeholder="说说你的安排，或添加文件。" aria-describedby="ai-input-shortcut"></textarea>
+    <div class="input-shortcut-hint" id="ai-input-shortcut">回车发送 · Shift + 回车换行</div>
     <div class="attachment-toolbar"><button class="quiet-button" data-action="upload-word">＋ Word</button><button class="quiet-button" data-action="upload-ppt">＋ PPT</button><button class="quiet-button" data-action="upload-file">＋ 文件</button><button class="icon-button" data-action="file-library" aria-label="文件库" title="文件库">▧</button></div>
     <input type="file" id="word-upload" accept=".docx" multiple hidden><input type="file" id="ppt-upload" accept=".pptx" multiple hidden><input type="file" id="other-upload" accept=".pdf,.txt,.md,.csv,.xlsx" multiple hidden>
     <div id="selected-files"></div>

@@ -120,4 +120,9 @@ assert.doesNotMatch(uiElements['#ai-result'].innerHTML,/proposal|应用所选建
 render('renderHistory()');
 assert.match(uiElements['#conversation-history'].innerHTML,/应用记录/);
 assert.match(uiElements['#conversation-history'].innerHTML,/已新增：示例任务/);
+context.currentJob={applied:[],result:{summary:'建议先建立项目',projects:[{name:'示例新项目',area:'通信组',project_type:'project',owner:'项目负责人'}],tasks:[],updates:[]}};
+render('renderAI()');
+assert.match(uiElements['#ai-result'].innerHTML,/建议新建 1 个项目/);
+assert.match(uiElements['#ai-result'].innerHTML,/value="project:0"/);
+assert.match(uiElements['#ai-result'].innerHTML,/应用所选建议/);
 console.log('Growth UI rendering checks passed.');

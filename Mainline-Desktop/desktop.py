@@ -28,7 +28,7 @@ import server as backend  # noqa: E402
 import background_reminders  # noqa: E402
 
 APP_NAME = 'Mainline'
-APP_DATA_VERSION = '2026-10-15-v8'
+APP_DATA_VERSION = '2026-10-15-v9'
 DEFAULT_PORT = 5179
 
 
@@ -222,7 +222,8 @@ def main() -> int:
         return 0
 
     bridge = DesktopBridge()
-    window = webview.create_window(APP_NAME, url, width=1280, height=860, min_size=(960, 640), js_api=bridge)
+    window = webview.create_window(APP_NAME, url, width=1280, height=860, min_size=(960, 640), js_api=bridge,
+                                   text_select=True)
     bridge._window = window
     webview.start()
     # 关闭窗口 → 安全停止后台
