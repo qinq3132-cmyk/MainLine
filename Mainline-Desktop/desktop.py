@@ -28,7 +28,7 @@ import server as backend  # noqa: E402
 import background_reminders  # noqa: E402
 
 APP_NAME = 'Mainline'
-APP_DATA_VERSION = '2026-10-16-v11'
+APP_DATA_VERSION = '2026-10-16-v12'
 DEFAULT_PORT = 5179
 
 

@@ -15,6 +15,8 @@ vm.runInContext(`
   function activeTasks(){return state.tasks.filter(t=>!t.deleted_at);}
   function visibleTasks(){return activeTasks().filter(t=>(showDone||t.status!=='done')&&(!projectFilter||t.project_id===projectFilter));}
   ${source.slice(source.indexOf('function homeTasks()'),source.indexOf('function qIndex('))}
+  ${source.slice(source.indexOf('function qIndex('),source.indexOf('function color('))}
+  ${source.slice(source.indexOf('function homeView()'),source.indexOf('function projectKind('))}
   function addDays(day,n){const d=new Date(day+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
   ${source.slice(source.indexOf('function projectKind('),source.indexOf('function overviewView('))}
   ${source.slice(source.indexOf('function projectProgress('),source.indexOf('function trashView('))}
@@ -67,6 +69,39 @@ context.state.tasks=[
 context.showDone=true;
 assert.deepEqual(Array.from(render('homeTasks().map(t=>t.id)')),['repeat-today','repeat-overdue','long-project']);
 context.showDone=false;
+context.state.tasks=[];
+
+// Check the actual four-quadrant rendering: execution time takes precedence
+// over deadline, including across dates and for today's recurring items.
+context.quadNames=['重要且紧急','重要不紧急','不重要但紧急','不重要不紧急'];
+context.quadHints=['','','',''];
+context.dayTasks=()=>[];
+const restoreSelectedProjectSummary=context.selectedProjectSummary;
+const restorePinnedGoals=context.pinnedGoals;
+context.selectedProjectSummary=()=>'';
+context.pinnedGoals=()=>'';
+for(let q=0;q<4;q++){
+  const fixture=(title,extra={})=>({id:`${q}-${title}`,title,important:q<2,urgent:q%2===0,status:'todo',repeat:'none',...extra});
+  context.state.tasks=[
+    fixture('未排期'),
+    fixture('下午安排',{scheduled_at:'2026-10-15T15:00',deadline:'2026-10-14'}),
+    fixture('明天早晨',{scheduled_at:'2026-10-16T08:00'}),
+    fixture('上午周期事项',{scheduled_at:'2026-10-15T09:00',occurrence:'2026-10-15',repeat:'daily',deadline:'2026-10-20'}),
+    fixture('相同时刻甲',{scheduled_at:'2026-10-15T11:00'}),
+    fixture('相同时刻乙',{scheduled_at:'2026-10-15T11:00'}),
+    fixture('仅有截止日期',{deadline:'2026-10-13'}),
+    fixture('昨天安排',{scheduled_at:'2026-10-14T17:00'}),
+    fixture('已完成',{scheduled_at:'2026-10-14T08:00',status:'done'}),
+  ];
+  const expected=['昨天安排','上午周期事项','相同时刻甲','相同时刻乙','下午安排','明天早晨','仅有截止日期','未排期'];
+  const titles=()=>Array.from(render('homeView()').matchAll(/<div class="test-task">([^<]+)<\/div>/g),m=>m[1]);
+  assert.deepEqual(titles(),expected,`Quadrant ${q} must follow scheduled dates and times.`);
+  context.showDone=true;
+  assert.deepEqual(titles(),[...expected,'已完成'],'Completed tasks remain below pending work when shown.');
+  context.showDone=false;
+}
+context.selectedProjectSummary=restoreSelectedProjectSummary;
+context.pinnedGoals=restorePinnedGoals;
 context.state.tasks=[];
 
 context.state.goals = [{id:'g',title:'研究方向',status:'active',next_review:'2026-10-22'}];
