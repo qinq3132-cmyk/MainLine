@@ -5,6 +5,8 @@ window.Writing = (() => {
   const dialog = q('#note-dialog'), form = q('#note-form');
   let editor = null, session = null, loading = null, timer = null, flight = null;
   let selectedVersion = null, uploading = false;
+  let editorRange = null, toolbarTitleOrigin = false, removingHeading = false;
+  let toolbarEvents = null;
   const cacheKey = 'mainline-writing-emergency';
   const error = message => { q('#note-error').textContent = message || ''; };
   const status = message => { q('#writing-save-status').textContent = message; };
@@ -34,6 +36,101 @@ window.Writing = (() => {
       if (!window.Lute) await script('/vendor/vditor/dist/js/lute/lute.min.js', 'vditorLuteScript');
     })().catch(e => { loading = null; throw e; });
     return loading;
+  }
+
+  function editingSurface() {
+    const mode = editor?.getCurrentMode() || 'wysiwyg';
+    return q('#writing-editor .vditor-' + mode + '[contenteditable="true"], #writing-editor .vditor-' + mode + ' [contenteditable="true"], #writing-editor textarea.vditor-' + mode);
+  }
+
+  function rememberRange() {
+    const surface = editingSurface(), selection = window.getSelection();
+    if (surface instanceof HTMLTextAreaElement) return;
+    if (surface && selection?.rangeCount && surface.contains(selection.anchorNode) && surface.contains(selection.focusNode)) {
+      editorRange = selection.getRangeAt(0).cloneRange();
+      if (editor.getCurrentMode() === 'wysiwyg' && document.activeElement === surface) {
+        const node = selection.anchorNode.nodeType === Node.TEXT_NODE ? selection.anchorNode.parentElement : selection.anchorNode;
+        if (!node.closest?.('code,.vditor-wysiwyg__block')) {
+          for (const [name, command] of [['bold','bold'],['italic','italic'],['strike','strikeThrough']]) {
+            const button = q('#writing-editor button[data-type="' + name + '"]');
+            button?.classList.remove('vditor-menu--disabled');
+            button?.classList.toggle('vditor-menu--current', document.queryCommandState(command));
+          }
+        }
+      }
+    }
+  }
+
+  function restoreRange() {
+    const surface = editingSurface();
+    if (surface instanceof HTMLTextAreaElement) return;
+    if (!surface || !editorRange?.startContainer.isConnected || !surface.contains(editorRange.commonAncestorContainer)) return;
+    surface.focus({preventScroll:true});
+    const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(editorRange);
+  }
+
+  function plainMarkdown(content) {
+    // Display legacy plain text literally; retain its original bytes until a body edit.
+    const lute = window.Lute.New();
+    return lute.HTML2Md('<p>' + escapeHTML(content).replace(/\n/g, '<br>') + '</p>');
+  }
+
+  function enhanceToolbar() {
+    toolbarEvents?.abort(); toolbarEvents = new AbortController();
+    const root = q('#writing-editor'), headingButton = root.querySelector('button[data-type="headings"]');
+    root.querySelectorAll('button').forEach(button => button.type = 'button');
+    headingButton.innerHTML = '<span class="writing-heading-label">正文 / 标题 <span aria-hidden="true">⌄</span></span>';
+    headingButton.setAttribute('aria-label', '正文与标题级别'); headingButton.title = '选择正文或标题级别';
+    headingButton.setAttribute('aria-haspopup', 'menu');
+    const panel = headingButton.parentElement.querySelector('.vditor-hint');
+    const paragraph = document.createElement('button'); paragraph.type = 'button'; paragraph.dataset.writingParagraph = 'true';
+    paragraph.textContent = '正文'; panel.prepend(paragraph);
+    paragraph.addEventListener('click', event => {
+      event.preventDefault(); event.stopPropagation(); restoreRange();
+      const surface = editingSurface(), selection = window.getSelection();
+      const node = selection?.anchorNode?.nodeType === Node.TEXT_NODE ? selection.anchorNode.parentElement : selection?.anchorNode;
+      if (editor.getCurrentMode() === 'sv') {
+        const firstHeading = panel.querySelector('[data-tag="h1"]'), original = firstHeading.dataset.value;
+        firstHeading.dataset.value = '';
+        try { firstHeading.click(); } finally { firstHeading.dataset.value = original; }
+      } else if (surface?.contains(node) && node.closest?.('h1,h2,h3,h4,h5,h6')) {
+        headingButton.classList.add('vditor-menu--current');
+        removingHeading = true;
+        try { headingButton.click(); } finally { removingHeading = false; }
+      }
+      panel.style.display = 'none'; rememberRange();
+    });
+    // Scope focus preservation to editor commands, leaving popover inputs usable.
+    root.addEventListener('pointerdown', event => {
+      if (!event.target.closest('.vditor-toolbar button')) return;
+      toolbarTitleOrigin = document.activeElement === form.elements.title;
+      rememberRange();
+      if (event.button === 0 && !toolbarTitleOrigin) event.preventDefault();
+    }, {capture:true, signal:toolbarEvents.signal});
+    root.addEventListener('click', event => {
+      const button = event.target.closest('.vditor-toolbar button');
+      if (!button) return;
+      if (toolbarTitleOrigin) {
+        toolbarTitleOrigin = false; event.preventDefault(); event.stopImmediatePropagation();
+        error('排版工具用于正文。请先将光标放进正文，或选中要设置格式的文字。'); return;
+      }
+      rememberRange(); restoreRange();
+      if (button === headingButton && !removingHeading) {
+        // Vditor toggles a current heading off. Opening this menu must be read-only.
+        const wasCurrent = button.classList.contains('vditor-menu--current');
+        button.classList.remove('vditor-menu--current');
+        if (wasCurrent) setTimeout(() => button.classList.add('vditor-menu--current'), 0);
+        const rect = button.getBoundingClientRect();
+        const below = q('.writing-bottom').getBoundingClientRect().top - rect.bottom - 12;
+        const above = rect.top - q('.writing-scroll').getBoundingClientRect().top - 12;
+        const upward = below < 200 && above > below;
+        panel.style.top = upward ? 'auto' : '100%'; panel.style.bottom = upward ? '100%' : 'auto';
+        panel.style.maxHeight = Math.max(60, Math.min(360, upward ? above : below)) + 'px';
+        panel.classList.toggle('writing-menu-upward', upward);
+      }
+      if (button.dataset.type === 'bold') button.title = '加粗 / 取消加粗（Ctrl + B）';
+      setTimeout(rememberRange, 0);
+    }, {capture:true, signal:toolbarEvents.signal});
   }
 
   function snapshotForExit() {
@@ -120,6 +217,7 @@ window.Writing = (() => {
     const source = draft || note;
     session = {id:source?.id || newId(), content:source?.content || '', format:source?.format || (note ? 'plain' : 'markdown'),
       revision:draft ? (draft.base_revision || 0) : (note?.revision || 0), dirty:false, sequence:0, conflict:false, saved:!!note};
+    editorRange = null; toolbarTitleOrigin = false;
     form.reset(); form.elements.id.value = session.id;
     const projects = state.projects.filter(p => projectKind(p) === 'project' && (!p.deleted_at || p.id === source?.project_id));
     q('#note-project').innerHTML = '<option value="">整体笔记</option>' + projects.map(p => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.area)} / ${escapeHTML(p.name)}</option>`).join('');
@@ -144,7 +242,7 @@ window.Writing = (() => {
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('编辑器初始化超时，已保留文字模式。')), 12000);
         editor = new Vditor('writing-editor', {
-          cdn:'/vendor/vditor', i18n:window.VditorI18n, lang:'zh_CN', mode:current.format === 'plain' ? 'sv' : 'ir', value:current.content,
+          cdn:'/vendor/vditor', i18n:window.VditorI18n, lang:'zh_CN', mode:'wysiwyg', value:current.format === 'plain' ? plainMarkdown(current.content) : current.content,
           height:'100%', minHeight:380, placeholder:'写下观察、判断，或一个还没有答案的问题……',
           cache:{enable:false}, resize:{enable:false}, outline:{enable:false, position:'right'},
           toolbar:['headings','bold','italic','strike','|','list','ordered-list','quote','link',
@@ -156,15 +254,17 @@ window.Writing = (() => {
             render:{media:{enable:false}}},
           customRenders:['mermaid','graphviz','echarts','abc','plantuml','mindmap','flowchart','math'].map(language => ({language, render:() => {}})),
           upload:{accept:'image/png,image/jpeg,image/gif,image/webp', max:8*1024*1024, handler:files => insertImages(files)},
-          input:value => { if (session === current) { current.content = value; current.editorValue = value; current.format = 'markdown'; changed(); } },
+          input:value => { if (session === current && current.editorReady) { current.content = value; current.editorValue = value; current.format = 'markdown'; changed(); } },
           after:() => { clearTimeout(timeout); resolve(); },
         });
       });
       if (session !== current || !dialog.open) return;
       current.editorReady = true; current.editorValue = editor.getValue();
       q('#writing-fallback').hidden = true;
-      // Vendor toolbar controls must never submit the surrounding note form.
-      q('#writing-editor').querySelectorAll('button').forEach(button => button.type = 'button');
+      enhanceToolbar();
+      // Seed the initial undo checkpoint before the first rapid edit can replace
+      // the vendor's debounced initialization snapshot.
+      editor.clearStack();
     } catch (e) {
       if (session !== current || !dialog.open) return;
       q('#writing-editor').hidden = true; q('#writing-fallback').hidden = false;
@@ -175,7 +275,7 @@ window.Writing = (() => {
   async function close() {
     if (uploading) { error('图片正在保存，请稍等。'); return; }
     try { await flush(); } catch { return; }
-    clearTimeout(timer); editor?.destroy(); editor = null;
+    clearTimeout(timer); toolbarEvents?.abort(); editor?.destroy(); editor = null;
     dialog.close(); session = null; await refresh();
   }
 
@@ -296,6 +396,7 @@ window.Writing = (() => {
     q('#writing-focus').textContent = dialog.classList.contains('writing-focused') ? '退出专注' : '专注模式';
   });
   dialog.addEventListener('cancel', handled(close));
+  document.addEventListener('selectionchange', () => { if (session?.editorReady && dialog.open) rememberRange(); });
   dialog.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') { e.preventDefault(); flush().catch(() => {}); }
   });

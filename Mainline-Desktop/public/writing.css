@@ -1,4 +1,12 @@
 /* Large, quiet writing space. Vendor styles are scoped by this dialog. */
+.note-editor #writing-editor .vditor-toolbar .vditor-hint{min-width:210px;max-height:min(360px,45vh);overflow-y:auto;padding:6px;background:#fff;box-shadow:0 8px 24px #263d2b20;z-index:30}
+.note-editor #writing-editor .writing-menu-upward::before,.note-editor #writing-editor .writing-menu-upward::after{display:none}
+.note-editor #writing-editor .vditor-toolbar .vditor-hint button{display:block;width:100%;min-height:34px;padding:7px 11px;text-align:left;border-radius:5px;line-height:1.5;color:#3e5845;font-weight:400;white-space:nowrap}
+.note-editor #writing-editor .vditor-toolbar .vditor-hint button:hover,.note-editor #writing-editor .vditor-toolbar button.vditor-menu--current{background:#e4eddf;color:#315c3e}
+.note-editor #writing-editor .writing-heading-label{font-size:13px;white-space:nowrap;display:inline-flex;align-items:center;gap:12px;padding:2px 5px}
+.note-editor #writing-editor .vditor-toolbar button:focus-visible{outline:2px solid #668c6c;outline-offset:2px}
+.note-editor #writing-editor .vditor-reset strong,.note-editor #writing-editor .vditor-reset b{font-weight:750}
+.note-editor #writing-editor .vditor-reset h1{font-size:1.9em}.note-editor #writing-editor .vditor-reset h2{font-size:1.55em}.note-editor #writing-editor .vditor-reset h3{font-size:1.3em}.note-editor #writing-editor .vditor-reset h4{font-size:1.15em}.note-editor #writing-editor .vditor-reset h5{font-size:1.05em}.note-editor #writing-editor .vditor-reset h6{font-size:1em}
 .note-editor [hidden]{display:none!important}
 dialog.note-editor{--writing-font:18px;--writing-spacing:1.9;--writing-width:820px;position:fixed;inset:0;width:100vw;max-width:none;height:100vh;height:100dvh;max-height:none;margin:0;padding:0;border:0;border-radius:0;background:#fafbf8;color:#34483b;overflow:hidden}
 .note-editor #note-form{height:100%;display:flex;flex-direction:column;position:relative}

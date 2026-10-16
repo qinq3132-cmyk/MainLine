@@ -7,6 +7,6 @@ JUeSmmNNxXaq4j29F6OZ/vLgyM/Wt/SpSK4o/gyrc02uTsS+iTeC0ofajxbW29WSJ4LFMec4nrywVul5
 
 The selected offline distribution files are unmodified. See LICENSE.txt and
 the copyright and dependency notices preserved in the distribution scripts.
-Only the editor, Lute parser, Chinese translation, icons and loading image
+Only the editor, Lute parser, Chinese translation, icons, loading image and default code stylesheet
 are included. Optional network renderers, mathematics, diagrams and cloud
 uploads are not enabled by Mainline.
