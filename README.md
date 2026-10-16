@@ -22,9 +22,11 @@ Mainline 是一个本地运行的可视化个人秘书：四象限管理、两�
 
 ## Windows 下载安装
 
-**[下载最新版单文件 Mainline.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-15-v9.exe)**（Windows 64 位，2026-10-15 更新版）。下载后将 EXE 放在自己选择的文件夹，双击运行；无需安装 Python，也无需下载源码。它是免安装桌面版，不是 Setup 安装器。v9 修复秘书新建项目、界面文字复制和回车发送；首次启动仍可能因自解压稍慢。
+**[下载最新版单文件 Mainline.exe](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-16-v10.exe)**（Windows 64 位，2026-10-15 更新版）。下载后将 EXE 放在自己选择的文件夹，双击运行；无需安装 Python，也无需下载源码。它是免安装桌面版，不是 Setup 安装器。v10 新增大屏 Markdown 写作、本机插图、自动保存、草稿与历史版本恢复；首次启动仍可能因自解压稍慢。
 
 关闭旧版窗口后再运行新版。聊天、日程、任务等记录默认保存在 `%LOCALAPPDATA%\Mainline\data`，更新 EXE 不会重置这些记录，首次运行新版本还会自动备份数据库。模型 API Key 和 Server酱 SendKey **都不包含在下载包中**，请在程序的“偏好与数据”中自行配置。详细步骤、旧网页数据迁移方法和校验值见[Windows EXE 安装说明](Mainline-Desktop/Windows-EXE-安装.md)。
+
+桌面版的个人笔记支持大屏 Markdown 写作、专注模式、字号与行距调整、本机图片粘贴和拖入、自动保存、草稿续写及历史版本恢复。可按整体或项目保存；导出为 `.md`，含图片时打包为 `.zip`。笔记图片与文字一起保存在本机数据库，升级继续保留原记录。
 
 如需保留文件夹版，可使用[桌面版源码和说明](Mainline-Desktop/README.md)自行构建。单文件版与文件夹版使用同一个本地数据目录。
 

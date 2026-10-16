@@ -21,5 +21,7 @@ auth.json
 venv/
 build/
 dist/
+!public/vendor/vditor/dist/
+!public/vendor/vditor/dist/**
 release/
 *.spec

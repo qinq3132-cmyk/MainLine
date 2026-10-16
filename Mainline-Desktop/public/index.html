@@ -6,8 +6,9 @@
   <meta name="theme-color" content="#4263eb">
   <title>主线 · Mainline</title>
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/refined.css"><link rel="stylesheet" href="/notes.css"><link rel="stylesheet" href="/documents.css">
+  <link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/refined.css"><link rel="stylesheet" href="/notes.css"><link rel="stylesheet" href="/documents.css"><link rel="stylesheet" href="/writing.css">
   <script src="/app.js" defer></script>
+  <script src="/writing.js" defer></script>
 </head>
 <body>
 <div class="app-shell">
@@ -64,12 +65,14 @@
   </form>
 </dialog>
 <dialog id="note-dialog" class="editor-dialog note-editor">
-  <form id="note-form"><div class="dialog-heading"><div><div class="eyebrow">A PLACE TO THINK</div><h2 id="note-editor-title">写一篇笔记</h2></div><button type="button" class="icon-button" data-close="note-dialog" aria-label="关闭">×</button></div>
-    <input type="hidden" name="id"><label class="field">笔记标题<input name="title" required maxlength="160" placeholder="给这次思考起个名字"></label>
-    <label class="field">归属<select name="project_id" id="note-project"><option value="">整体笔记</option></select></label>
-    <label class="field">正文<textarea name="content" required maxlength="30000" rows="12" placeholder="写下观察、判断、尚未想清楚的问题，以及下一步想验证什么……"></textarea></label>
-    <p class="help-text">保存在本机。使用秘书时，相关笔记的节选会随请求发送给你选择的模型服务商。</p>
-    <div id="note-error" class="form-error" role="alert"></div><footer class="dialog-footer"><button type="button" class="quiet-button" id="note-archive" data-action="archive-note" hidden>归档笔记</button><span></span><button type="submit" class="primary-button">保存笔记</button></footer>
+  <form id="note-form">
+    <header class="writing-topbar"><div class="writing-return"><button type="button" class="quiet-button" id="writing-back">← 笔记库</button><span class="writing-brand">主线 <i>/</i> 写作</span></div><div class="writing-actions"><span id="writing-save-status" role="status">本机保存</span><button type="button" class="quiet-button" id="writing-versions">历史版本</button><button type="button" class="quiet-button" id="writing-export">导出 Markdown</button><button type="submit" class="primary-button" id="writing-save">保存</button></div></header>
+    <div class="writing-controls"><label class="writing-project-label">归属 <select name="project_id" id="note-project" aria-label="笔记归属"><option value="">整体笔记</option></select></label><div class="writing-options"><label>字号 <select id="writing-font" aria-label="正文字号"><option value="16">16</option><option value="18" selected>18</option><option value="20">20</option><option value="22">22</option></select></label><label>行距 <select id="writing-spacing" aria-label="正文行距"><option value="1.6">紧凑</option><option value="1.9" selected>舒适</option><option value="2.2">宽松</option></select></label><label>版心 <select id="writing-width" aria-label="正文宽度"><option value="680">窄</option><option value="820" selected>适中</option><option value="1040">宽</option></select></label><button type="button" class="quiet-button" id="writing-focus" aria-pressed="false">专注模式</button></div></div>
+    <div class="writing-scroll"><div class="writing-heading"><div class="note-kicker">A PLACE TO THINK</div><h2 id="note-editor-title" class="sr-only">写一篇笔记</h2><input type="hidden" name="id"><input name="title" id="writing-title" maxlength="160" placeholder="无题，也可以慢慢想" aria-label="笔记标题" autocomplete="off"><p>留下观察，也给尚未成形的想法留一点空间。</p></div><div id="writing-editor" aria-label="笔记正文"></div><textarea name="content" id="writing-fallback" aria-label="Markdown 正文" placeholder="写下此刻的想法……" hidden></textarea></div>
+    <div class="writing-bottom"><span id="writing-count">0 字</span><span>图片仅存本机 · Ctrl + S 保存</span><button type="button" class="inline-link" id="note-archive" hidden>归档笔记</button></div>
+    <div id="note-error" class="form-error" role="alert"></div><button type="button" id="writing-save-copy" class="quiet-button" hidden>将当前草稿另存为新笔记</button>
+    <aside id="writing-history" class="writing-history" hidden aria-label="历史版本与草稿"><div class="writing-history-heading"><h3>写作记录</h3><button type="button" id="writing-history-close" class="icon-button" aria-label="关闭写作记录">×</button></div><div id="writing-history-list"></div><div id="writing-history-preview" hidden><textarea readonly aria-label="历史内容预览"></textarea><button type="button" id="writing-restore" class="primary-button">恢复到编辑区</button></div></aside>
+    <input type="file" id="writing-image" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
   </form>
 </dialog>
 <dialog id="goal-dialog" class="editor-dialog">

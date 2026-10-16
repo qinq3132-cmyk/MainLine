@@ -28,6 +28,7 @@ from documents import extract as extract_document, MAX_BYTES as MAX_FILE_BYTES
 from llm_config import LLMConfig
 from serverchan import DAILY_LIMIT, ServerChanConfig, send as send_serverchan
 import background_reminders
+from note_store import NotebookMixin, MAX_NOTE_LENGTH, MAX_IMAGE_BYTES
 
 ROOT = Path(__file__).resolve().parent
 if getattr(sys, 'frozen', False):
@@ -378,7 +379,7 @@ def recurring_previews(tasks, start, end):
     return previews
 
 
-class Store:
+class Store(NotebookMixin):
     def __init__(self, directory):
         self.dir = Path(directory)
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -399,6 +400,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS notes(id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS push_attempts(id TEXT PRIMARY KEY, day TEXT NOT NULL, data TEXT NOT NULL);
             ''')
+            self.init_notebook(db)
             if not db.execute("SELECT 1 FROM settings WHERE key='initialized'").fetchone():
                 for i, area in enumerate(AREAS):
                     p = {'id': uid(), 'name': area, 'area': area, 'color': COLORS[i], 'goal': '',
@@ -474,7 +476,7 @@ class Store:
 
     def state(self):
         return {'tasks': self.all('tasks'), 'projects': [{**p, 'project_type': project_type(p)} for p in self.all('projects')],
-                'goals': self.all('goals'), 'notes': self.all('notes'),
+                'goals': self.all('goals'), 'notes': self.all('notes'), 'writing_drafts': self.writing_drafts(summary=True),
                 'files': [self.file_public(f) for f in self.all('files') if not f.get('deleted_at')],
                 'settings': self.settings(), 'notifications': self.all('notifications')[-200:],
                 'messages': self.all('messages')[-100:], 'focus': self.all('focus')[-300:],
@@ -493,8 +495,11 @@ class Store:
         project_id = data.get('project_id', old.get('project_id', '') if old else '')
         if not isinstance(title, str) or not title.strip() or len(title.strip()) > 160:
             raise ValueError('笔记标题需要 1–160 字。')
-        if not isinstance(content, str) or not content.strip() or len(content) > 30000:
-            raise ValueError('笔记正文需要 1–30000 字。')
+        if not isinstance(content, str) or not content.strip() or len(content) > MAX_NOTE_LENGTH:
+            raise ValueError('笔记正文需要 1–300000 字。')
+        content_format = data.get('format', (old or {}).get('format', 'plain'))
+        if content_format not in {'plain', 'markdown'}:
+            raise ValueError('笔记格式无效。')
         if not isinstance(project_id, str):
             raise ValueError('笔记关联项目无效。')
         if project_id:
@@ -502,11 +507,12 @@ class Store:
             if not p or project_type(p) != 'project' or (p.get('deleted_at') and project_id != (old or {}).get('project_id')):
                 raise ValueError('请选择一个现有的具体项目。')
         timestamp = stamp()
-        record = {**(old or {}), 'id': item_id or uid(), 'title': title.strip(),
-                  'content': content.strip(), 'project_id': project_id,
+        record = {**(old or {}), 'id': item_id or data.get('_new_id') or uid(), 'title': title.strip(),
+                  'content': content, 'project_id': project_id, 'format': content_format,
                   'created_at': old['created_at'] if old else timestamp,
-                  'updated_at': timestamp, 'deleted_at': ''}
-        return self.put('notes', record)
+                  'updated_at': timestamp, 'deleted_at': '', '_checkpoint': data.get('checkpoint') is True}
+        with self.lock:
+            return self.persist_note(record, old)
 
     def conflicts(self, task, tasks=None):
         if not task.get('scheduled_at') or task.get('status') == 'done' or task.get('deleted_at'):
@@ -889,7 +895,7 @@ class Store:
         return {'format': 'personal-desk', 'version': 1, 'exported_at': stamp(),
                 **{k: self.all(k) for k in ['projects', 'tasks', 'focus', 'goals', 'notes', 'messages', 'notifications', 'jobs']},
                 'files': [{k: v for k, v in f.items() if k != 'stored_filename'} for f in self.all('files')],
-                'settings': self.settings()}
+                'settings': self.settings(), 'writing': self.writing_export()}
 
     def restore(self, data):
         if data.get('format') != 'personal-desk' or data.get('version') != 1:
@@ -897,6 +903,7 @@ class Store:
         projects, tasks, focus = data.get('projects'), data.get('tasks'), data.get('focus', [])
         goals, files = data.get('goals', self.all('goals')), data.get('files', self.all('files'))
         notes = data.get('notes', self.all('notes'))
+        writing = self.validate_writing_backup(data.get('writing', {}))
         messages = data.get('messages', self.all('messages'))
         notifications = data.get('notifications', self.all('notifications'))
         jobs = data.get('jobs', self.all('jobs'))
@@ -944,7 +951,8 @@ class Store:
         if any(not isinstance(m.get('role'), str) or not isinstance(m.get('content'), str) for m in messages):
             raise ValueError('聊天备份内容无效。')
         if any(not isinstance(n.get('title'), str) or not n['title'].strip() or len(n['title']) > 160
-               or not isinstance(n.get('content'), str) or not n['content'].strip() or len(n['content']) > 30000
+               or not isinstance(n.get('content'), str) or not n['content'].strip() or len(n['content']) > MAX_NOTE_LENGTH
+               or n.get('format', 'plain') not in {'plain', 'markdown'}
                or not isinstance(n.get('project_id', ''), str)
                or not isinstance(n.get('created_at'), str) or not isinstance(n.get('updated_at'), str)
                for n in notes):
@@ -973,6 +981,7 @@ class Store:
                     db.execute(f'DELETE FROM {table}')
                     db.executemany(f'INSERT INTO {table} VALUES(?,?)', [(r['id'], json.dumps(r, ensure_ascii=False)) for r in records])
                 db.execute('INSERT OR REPLACE INTO settings VALUES(?,?)', ('preferences', json.dumps(settings)))
+                self.import_writing(db, writing)
         return {'backup': saved, 'tasks': len(tasks), 'projects': len(projects), 'goals': len(goals),
                 'files': len(files), 'notes': len(notes), 'messages': len(messages), 'notifications': len(notifications), 'jobs': len(jobs)}
 
@@ -1330,6 +1339,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def send_blob(self, raw, mime, filename=None):
+        self.send_response(200)
+        self.send_header('Content-Type', mime)
+        self.send_header('Content-Length', str(len(raw)))
+        self.send_header('Cache-Control', 'no-store')
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('Cross-Origin-Resource-Policy', 'same-origin')
+        if filename:
+            self.send_header('Content-Disposition', "attachment; filename*=UTF-8''" + urllib.parse.quote(filename))
+        self.end_headers()
+        self.wfile.write(raw)
+
     def allowed(self, api=True):
         port = self.server.server_port
         hosts = {f'127.0.0.1:{port}', f'localhost:{port}'}
@@ -1362,8 +1383,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                         'root': str(ROOT), 'pid': os.getpid()})
         if not self.allowed(path.startswith('/api/')):
             return self.send_json(403, {'error': '请从本机指挥台页面访问。'})
+        if path.startswith('/note-assets/'):
+            if self.headers.get('Sec-Fetch-Site') == 'cross-site':
+                return self.send_json(403, {'error': '图片仅限本机写作页面读取。'})
+            image = self.server.store.note_image(path.split('/')[-1])
+            if not image:
+                return self.send_json(404, {'error': '图片不存在。'})
+            return self.send_blob(image[1], image[0]['mime'])
         if path.startswith('/api/'):
             try:
+                if path == '/api/writing/drafts':
+                    return self.send_json(200, {'drafts': self.server.store.writing_drafts()})
+                if path.startswith('/api/writing/versions/'):
+                    return self.send_json(200, {'versions': self.server.store.writing_versions(path.split('/')[-1])})
+                if path.startswith('/api/writing/export/'):
+                    raw, filename, mime = self.server.store.export_note(path.split('/')[-1])
+                    return self.send_blob(raw, mime, filename)
                 if path == '/api/state':
                     self.server.assistant.tick(allow_ai=False)
                     return self.send_json(200, self.server.store.state())
@@ -1435,6 +1470,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         store, assistant = self.server.store, self.server.assistant
         try:
+            if path == '/api/writing/images' and method == 'POST':
+                length = int(self.headers.get('Content-Length', '0'))
+                content_type = self.headers.get('Content-Type', '')
+                if not 0 < length <= MAX_IMAGE_BYTES + 65536 or not content_type.startswith('multipart/form-data'):
+                    raise ValueError('请选择一张不超过 8 MB 的图片。')
+                message = BytesParser(policy=email.policy.default).parsebytes(('Content-Type: '+content_type+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+self.rfile.read(length))
+                parts = [p for p in message.iter_parts() if p.get_filename()] if message.is_multipart() else []
+                if len(parts) != 1:
+                    raise ValueError('请每次插入一张图片。')
+                return self.send_json(201, store.add_note_image(parts[0].get_filename(), parts[0].get_payload(decode=True)))
             if path == '/api/files' and method == 'POST':
                 length = int(self.headers.get('Content-Length', '0'))
                 content_type = self.headers.get('Content-Type', '')
@@ -1462,6 +1507,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                for p in fields if p.get_param('name', header='content-disposition') == 'path'), '')
                 return self.send_json(201, store.add_project_document(parts[3], folder, uploads[0].get_filename(), uploads[0].get_payload(decode=True)))
             data = self.body()
+            if path == '/api/writing/save' and method == 'POST':
+                return self.send_json(200, store.save_writing(data))
+            if path == '/api/writing/draft' and method == 'DELETE':
+                with store.lock, store.connect() as db:
+                    db.execute('DELETE FROM note_drafts WHERE id=?', (str(data.get('id', '')),))
+                return self.send_json(200, {'deleted': True})
             if path.startswith('/api/project-documents/'):
                 parts = path.split('/')
                 if len(parts) != 5 or method != 'POST':

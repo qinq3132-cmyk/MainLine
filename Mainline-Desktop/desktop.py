@@ -28,7 +28,7 @@ import server as backend  # noqa: E402
 import background_reminders  # noqa: E402
 
 APP_NAME = 'Mainline'
-APP_DATA_VERSION = '2026-10-15-v9'
+APP_DATA_VERSION = '2026-10-16-v10'
 DEFAULT_PORT = 5179
 
 
@@ -145,6 +145,37 @@ class DesktopBridge:
         # pywebview walks every public attribute of js_api. Keep the native
         # Window private so it cannot recursively inspect the entire GUI.
         self._window = None
+        self._store = None
+        self._close_ready = False
+        self._close_worker_active = False
+
+    def _prepare_close(self):
+        if self._close_ready:
+            return
+        if not self._close_worker_active:
+            self._close_worker_active = True
+            threading.Thread(target=self._flush_before_close, daemon=True, name='writing-close').start()
+        # The WinForms closing event runs on the UI thread. Release it before
+        # evaluating JavaScript, whose completion needs that same UI thread.
+        return False
+
+    def _flush_before_close(self):
+        try:
+            pending = self._window.evaluate_js('window.Writing ? {uploading: window.Writing.isUploading(), draft: window.Writing.snapshotForExit()} : null')
+            if pending and pending.get('uploading'):
+                self._window.evaluate_js('window.Writing.showCloseError()')
+                return
+            if pending and pending.get('draft'):
+                self._store.save_writing(pending['draft'])
+            self._close_ready = True
+            self._window.destroy()
+        except Exception:
+            try:
+                self._window.evaluate_js('window.Writing && window.Writing.showCloseError()')
+            except Exception:
+                pass
+        finally:
+            self._close_worker_active = False
 
     def choose_folder(self):
         if self._window is None:
@@ -152,6 +183,24 @@ class DesktopBridge:
         import webview
         selected = self._window.create_file_dialog(webview.FileDialog.FOLDER)
         return str(selected[0]) if selected else ''
+
+    def export_note(self, note_id):
+        if self._window is None or self._store is None:
+            return {'error': '写作窗口尚未就绪。'}
+        try:
+            import webview
+            raw, filename, mime = self._store.export_note(str(note_id))
+            kind = 'ZIP (*.zip)' if filename.endswith('.zip') else 'Markdown (*.md)'
+            selected = self._window.create_file_dialog(webview.FileDialog.SAVE, save_filename=filename, file_types=(kind,))
+            if not selected:
+                return {'saved': False}
+            target = Path(selected if isinstance(selected, str) else selected[0])
+            if not target.suffix:
+                target = target.with_suffix(Path(filename).suffix)
+            target.write_bytes(raw)
+            return {'saved': True, 'images': mime == 'application/zip'}
+        except Exception:
+            return {'error': '导出未完成，请检查保存位置是否可写。'}
 
 
 def main() -> int:
@@ -163,8 +212,8 @@ def main() -> int:
         if migrated:
             print('已将旧网页数据安全复制到桌面版数据目录；原数据保留。')
         backup_before_update(data_dir)
-    except Exception:
-        print('旧数据迁移未完成；原数据仍保留，请检查迁移日志。', file=sys.stderr)
+    except Exception as exc:
+        print('本机数据检查未完成；原记录仍保留。请检查数据目录权限。原因：' + str(exc), file=sys.stderr)
         return 1
     if '--check-reminders' in sys.argv:
         try:
@@ -225,6 +274,9 @@ def main() -> int:
     window = webview.create_window(APP_NAME, url, width=1280, height=860, min_size=(960, 640), js_api=bridge,
                                    text_select=True)
     bridge._window = window
+    bridge._store = srv.store
+
+    window.events.closing += bridge._prepare_close
     webview.start()
     # 关闭窗口 → 安全停止后台
     srv.assistant.stop.set()

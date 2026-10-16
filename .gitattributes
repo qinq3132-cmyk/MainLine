@@ -1,0 +1,2 @@
+# Preserve the official vendored files byte-for-byte, including their whitespace.
+Mainline-Desktop/public/vendor/vditor/dist/** -text -whitespace
