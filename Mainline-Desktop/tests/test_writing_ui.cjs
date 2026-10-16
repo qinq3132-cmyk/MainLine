@@ -50,12 +50,70 @@ srv.serve_forever()
       throw new Error('Timed out awaiting expected writing state');
     };
     await page.goto(base);
+    // Verify the real dashboard after API writes and refreshes, using only
+    // invented tasks. Deadline-only cards must interleave with timed cards.
+    const today=(await getState()).today;
+    const day=offset=>{const d=new Date(today+'T12:00:00Z');d.setUTCDate(d.getUTCDate()+offset);return d.toISOString().slice(0,10);};
+    for(let quadrant=0;quadrant<4;quadrant++) {
+      const minute=String(quadrant*10).padStart(2,'0');
+      const fixtures=[
+        {title:'未定日期'},
+        {title:'明早安排',scheduled_at:day(1)+'T09:'+minute},
+        {title:'下午安排',scheduled_at:today+'T15:'+minute},
+        {title:'今天截止',deadline:today},
+        {title:'上午周期',scheduled_at:today+'T09:'+minute,repeat:'daily'},
+        {title:'更早截止',deadline:day(-2)},
+        {title:'昨天安排',scheduled_at:day(-1)+'T17:'+minute},
+      ];
+      const ids={};
+      for(const fixture of fixtures) {
+        const response=await page.request.post(base+'/api/tasks',{headers:{'X-Personal-Desk':'1'},data:{duration:5,important:quadrant<2,urgent:quadrant%2===0,...fixture}});
+        assert.equal(response.status(),201);
+        ids[fixture.title]=(await response.json()).id;
+      }
+      await page.evaluate(()=>refresh());
+      const cards=page.locator(`.quadrant[data-quadrant="${quadrant}"] .task-title`);
+      assert.deepEqual(await cards.allTextContents(),['更早截止','昨天安排','上午周期','下午安排','今天截止','明早安排','未定日期']);
+      await page.request.patch(base+'/api/tasks/'+ids['下午安排'],{headers:{'X-Personal-Desk':'1'},data:{scheduled_at:today+'T08:'+minute}});
+      await page.evaluate(()=>refresh());
+      assert.deepEqual(await cards.allTextContents(),['更早截止','昨天安排','下午安排','上午周期','今天截止','明早安排','未定日期']);
+      await page.request.patch(base+'/api/tasks/'+ids['上午周期'],{headers:{'X-Personal-Desk':'1'},data:{status:'done'}});
+      await page.evaluate(()=>refresh());
+      assert.deepEqual(await cards.allTextContents(),['更早截止','昨天安排','下午安排','今天截止','明早安排','未定日期']);
+    }
+    fs.mkdirSync(path.join(root,'qa-artifacts'),{recursive:true});
+    await page.locator('.quadrants').screenshot({path:path.join(root,'qa-artifacts','quadrants-time-verified.png')});
     await page.locator('[data-nav=notes]').click();
     await page.locator('[data-action=edit-note]').first().click();
     const body = page.locator('#writing-editor .vditor-wysiwyg pre[contenteditable=true]');
     await body.waitFor();
     await until(() => page.locator('#writing-fallback').isHidden());
     assert.equal(await page.locator('#note-dialog').evaluate(el => Math.round(el.getBoundingClientRect().width)), 1440);
+    const assertToolbarLayout = async () => {
+      const layout = await page.locator('#writing-editor .vditor-toolbar').evaluate(toolbar => {
+        const rect = el => {const r=el.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom};};
+        const heading = toolbar.querySelector('[data-type=headings]');
+        return {heading:rect(heading),label:rect(heading.querySelector('.writing-heading-label')),
+          toolbar:rect(toolbar),items:Array.from(toolbar.querySelectorAll(':scope > .vditor-toolbar__item')).filter(el=>el.getBoundingClientRect().width>0).map(rect)};
+      });
+      assert.ok(layout.label.left >= layout.heading.left && layout.label.right <= layout.heading.right + 1,
+        'The heading label must fit inside its own button instead of covering bold and italic.');
+      for (const [i,item] of layout.items.entries()) {
+        assert.ok(item.left >= layout.toolbar.left && item.right <= layout.toolbar.right + 1,'Every toolbar item must fit inside the toolbar.');
+        for (const other of layout.items.slice(i+1)) {
+          const intersects = Math.min(item.right,other.right)-Math.max(item.left,other.left)>1 && Math.min(item.bottom,other.bottom)-Math.max(item.top,other.top)>1;
+          assert.equal(intersects,false,'Toolbar controls must not overlap, including wrapped rows.');
+        }
+      }
+    };
+    fs.mkdirSync(path.join(root,'qa-artifacts'),{recursive:true});
+    await page.locator('#writing-editor .vditor-toolbar').screenshot({path:path.join(root,'qa-artifacts','writing-toolbar.png')});
+    await assertToolbarLayout();
+    for (const width of [960,620,480]) {
+      await page.setViewportSize({width,height:800});
+      await assertToolbarLayout();
+    }
+    await page.setViewportSize({width:1440,height:1000});
     const selectText = async (surface, text, collapsed = false) => surface.evaluate((el, {text, collapsed}) => {
       el.focus();
       if (el instanceof HTMLTextAreaElement) {
@@ -134,6 +192,7 @@ srv.serve_forever()
     assert.match(await body.locator('b,strong').allInnerTexts().then(t => t.join('')), /fictional/);
     await command('bold').click();
     await page.setViewportSize({width:960,height:640});
+    await assertToolbarLayout();
     await selectText(body, 'Observations'); await command('headings').click();
     const menu = page.locator('#writing-editor button[data-type=headings]').locator('..').locator('.vditor-hint');
     assert.ok(await menu.evaluate(el => el.getBoundingClientRect().bottom <= document.querySelector('.writing-bottom').getBoundingClientRect().top));
@@ -222,7 +281,7 @@ srv.serve_forever()
     assert.deepEqual(external, [], 'Editor must not send any request to outside services');
     assert.deepEqual(failures, [], 'No missing local editor dependencies');
     assert.deepEqual(errors, [], 'No JS or CSP console errors');
-    console.log('Writing UI passed: formatting toggles and shortcuts, six heading levels and paragraph in all modes, reopen, Chinese text, autosave, images, export, versions, literal legacy text, offline requests.');
+    console.log('Dashboard and writing UI passed: mixed-date order in all four quadrants, rescheduling, recurring completion, toolbar layout at four widths, formatting, autosave, images, export, versions, legacy text, offline requests.');
   } finally {
     if (browser) await browser.close();
     child.kill();

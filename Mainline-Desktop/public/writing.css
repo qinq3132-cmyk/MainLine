@@ -4,6 +4,12 @@
 .note-editor #writing-editor .vditor-toolbar .vditor-hint button{display:block;width:100%;min-height:34px;padding:7px 11px;text-align:left;border-radius:5px;line-height:1.5;color:#3e5845;font-weight:400;white-space:nowrap}
 .note-editor #writing-editor .vditor-toolbar .vditor-hint button:hover,.note-editor #writing-editor .vditor-toolbar button.vditor-menu--current{background:#e4eddf;color:#315c3e}
 .note-editor #writing-editor .writing-heading-label{font-size:13px;white-space:nowrap;display:inline-flex;align-items:center;gap:12px;padding:2px 5px}
+.note-editor #writing-editor .vditor-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px}
+.note-editor #writing-editor .vditor-toolbar__item{float:none;flex:0 0 auto;padding:0}
+.note-editor #writing-editor .vditor-toolbar__item>.vditor-tooltipped{width:30px;height:32px;display:inline-flex;align-items:center;justify-content:center}
+.note-editor #writing-editor .vditor-toolbar__item>button[data-type="headings"]{width:auto;min-width:112px;padding:0 6px}
+.note-editor #writing-editor .vditor-toolbar__divider{float:none;flex:0 0 auto;margin:0 4px;height:20px}
+.note-editor #writing-editor .vditor-toolbar__br{flex-basis:100%}
 .note-editor #writing-editor .vditor-toolbar button:focus-visible{outline:2px solid #668c6c;outline-offset:2px}
 .note-editor #writing-editor .vditor-reset strong,.note-editor #writing-editor .vditor-reset b{font-weight:750}
 .note-editor #writing-editor .vditor-reset h1{font-size:1.9em}.note-editor #writing-editor .vditor-reset h2{font-size:1.55em}.note-editor #writing-editor .vditor-reset h3{font-size:1.3em}.note-editor #writing-editor .vditor-reset h4{font-size:1.15em}.note-editor #writing-editor .vditor-reset h5{font-size:1.05em}.note-editor #writing-editor .vditor-reset h6{font-size:1em}

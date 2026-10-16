@@ -71,8 +71,8 @@ assert.deepEqual(Array.from(render('homeTasks().map(t=>t.id)')),['repeat-today',
 context.showDone=false;
 context.state.tasks=[];
 
-// Check the actual four-quadrant rendering: execution time takes precedence
-// over deadline, including across dates and for today's recurring items.
+// Check the actual rendering with mixed execution times, deadline-only tasks,
+// and date-only recurring items. Earlier visible dates must not sink to the end.
 context.quadNames=['重要且紧急','重要不紧急','不重要但紧急','不重要不紧急'];
 context.quadHints=['','','',''];
 context.dayTasks=()=>[];
@@ -90,15 +90,21 @@ for(let q=0;q<4;q++){
     fixture('相同时刻甲',{scheduled_at:'2026-10-15T11:00'}),
     fixture('相同时刻乙',{scheduled_at:'2026-10-15T11:00'}),
     fixture('仅有截止日期',{deadline:'2026-10-13'}),
+    fixture('今天截止',{deadline:'2026-10-15'}),
+    fixture('周期日期',{repeat:'daily',occurrence:'2026-10-15'}),
+    fixture('明天截止',{deadline:'2026-10-16'}),
     fixture('昨天安排',{scheduled_at:'2026-10-14T17:00'}),
     fixture('已完成',{scheduled_at:'2026-10-14T08:00',status:'done'}),
   ];
-  const expected=['昨天安排','上午周期事项','相同时刻甲','相同时刻乙','下午安排','明天早晨','仅有截止日期','未排期'];
+  const expected=['仅有截止日期','昨天安排','上午周期事项','相同时刻甲','相同时刻乙','下午安排','今天截止','周期日期','明天早晨','明天截止','未排期'];
   const titles=()=>Array.from(render('homeView()').matchAll(/<div class="test-task">([^<]+)<\/div>/g),m=>m[1]);
   assert.deepEqual(titles(),expected,`Quadrant ${q} must follow scheduled dates and times.`);
   context.showDone=true;
   assert.deepEqual(titles(),[...expected,'已完成'],'Completed tasks remain below pending work when shown.');
   context.showDone=false;
+  context.state.tasks.find(t=>t.title==='下午安排').scheduled_at='2026-10-15T08:00';
+  const updated=[...expected];updated.splice(updated.indexOf('下午安排'),1);updated.splice(updated.indexOf('上午周期事项'),0,'下午安排');
+  assert.deepEqual(titles(),updated,'Editing a scheduled time must reorder the next render.');
 }
 context.selectedProjectSummary=restoreSelectedProjectSummary;
 context.pinnedGoals=restorePinnedGoals;
