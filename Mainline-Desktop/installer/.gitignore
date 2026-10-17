@@ -1,0 +1,4 @@
+.build/
+.tools/
+.qa/
+__pycache__/
