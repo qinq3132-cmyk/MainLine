@@ -8,6 +8,7 @@ import json
 import re
 import uuid
 import zipfile
+from pathlib import PurePosixPath
 
 MAX_NOTE_LENGTH = 300_000
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
@@ -30,6 +31,28 @@ def image_type(raw):
     if raw.startswith(b'RIFF') and raw[8:12] == b'WEBP':
         return 'image/webp', '.webp'
     raise ValueError('支持 PNG、JPEG、GIF 和 WebP 图片；请将其他格式另存为 PNG。')
+
+
+DOCUMENT_TYPES = {'.pdf':'application/pdf', '.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                  '.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                  '.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+                  '.txt':'text/plain', '.md':'text/plain', '.csv':'text/csv'}
+
+def document_type(filename, raw):
+    suffix = PurePosixPath(str(filename).replace('\\', '/')).suffix.lower()
+    if suffix not in DOCUMENT_TYPES or not isinstance(raw, bytes) or not 0 < len(raw) <= 20 * 1024 * 1024:
+        raise ValueError('支持 PDF、DOCX、XLSX、PPTX、TXT、MD、CSV 文档，每个最多 20 MB。')
+    if suffix == '.pdf' and not raw.startswith(b'%PDF-'):
+        raise ValueError('PDF 文件格式无效。')
+    if suffix in {'.docx','.xlsx','.pptx'}:
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw)) as z:
+                expected = {'.docx':'word/document.xml','.xlsx':'xl/workbook.xml','.pptx':'ppt/presentation.xml'}[suffix]
+                if expected not in z.namelist() or '[Content_Types].xml' not in z.namelist() or any(n.lower().endswith('vbaproject.bin') for n in z.namelist()):
+                    raise ValueError('请选择不含宏的有效 Office 文档。')
+        except zipfile.BadZipFile:
+            raise ValueError('Office 文档格式无效。') from None
+    return DOCUMENT_TYPES[suffix], suffix
 
 
 class NotebookMixin:
@@ -110,6 +133,15 @@ class NotebookMixin:
             db.execute('INSERT INTO note_images VALUES(?,?,?)', (image_id, json.dumps(metadata, ensure_ascii=False), raw))
         return {**metadata, 'url': '/note-assets/' + image_id}
 
+    def add_note_document(self, filename, raw):
+        mime, suffix = document_type(filename, raw)
+        asset_id = uuid.uuid4().hex
+        name = str(filename).replace('\\', '/').rsplit('/', 1)[-1][:160]
+        metadata = {'id':asset_id, 'kind':'document', 'name':name, 'mime':mime, 'suffix':suffix, 'size':len(raw), 'created_at':timestamp()}
+        with self.lock, self.connect() as db:
+            db.execute('INSERT INTO note_images VALUES(?,?,?)', (asset_id, json.dumps(metadata, ensure_ascii=False), raw))
+        return {**metadata, 'url':'/note-assets/'+asset_id}
+
     def note_image(self, image_id):
         with self.lock, self.connect() as db:
             row = db.execute('SELECT metadata,body FROM note_images WHERE id=?', (image_id,)).fetchone()
@@ -136,7 +168,7 @@ class NotebookMixin:
                 raw = base64.b64decode(image.get('base64', ''), validate=True)
             except (ValueError, TypeError):
                 raise ValueError('图片备份内容无效。') from None
-            mime, suffix = image_type(raw)
+            mime, suffix = document_type(image.get('name', ''), raw) if image.get('kind') == 'document' else image_type(raw)
             meta = {k: v for k, v in image.items() if k != 'base64'}
             meta.update(mime=mime, suffix=suffix, size=len(raw))
             result['images'].append((image['id'], json.dumps(meta, ensure_ascii=False), raw))
@@ -168,7 +200,7 @@ class NotebookMixin:
             if not image:
                 raise ValueError('有图片无法读取，导出已停止，以免遗漏。')
             meta, raw = image
-            images[image_id] = ('images/' + image_id + meta['suffix'], raw)
+            images[image_id] = (('documents/' if meta.get('kind') == 'document' else 'images/') + image_id + meta['suffix'], raw)
         content = IMAGE_REF.sub(lambda m: images[m[1]][0], content)
         title = re.sub(r'[\x00-\x1f<>:"/\\|?*]', '_', note['title']).strip('. ')[:100] or '笔记'
         markdown = '# ' + note['title'] + '\n\n' + content

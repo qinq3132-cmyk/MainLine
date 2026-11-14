@@ -40,7 +40,7 @@ if getattr(sys, 'frozen', False):
 DEFAULT_DATA_DIR = Path(os.environ.get('LOCALAPPDATA') or (ROOT / 'data')) / 'Mainline' / 'data' if not os.environ.get('MAINLINE_DATA_DIR') else Path(os.environ['MAINLINE_DATA_DIR'])
 TZ = dt.timezone(dt.timedelta(hours=8), 'Asia/Shanghai')
 ACTIVE = {'todo', 'doing', 'waiting'}
-STATUSES = ACTIVE | {'done'}
+STATUSES = ACTIVE | {'done', 'skipped'}
 AREAS = ['通信组', '学习组', '个人科研', '创业探索', '生活与关系']
 COLORS = ['#4263eb', '#0ca678', '#7950f2', '#f76707', '#e64980']
 DEFAULTS = {'model': '', 'work_start': '09:00', 'work_end': '18:00',
@@ -515,7 +515,7 @@ class Store(NotebookMixin):
             return self.persist_note(record, old)
 
     def conflicts(self, task, tasks=None):
-        if not task.get('scheduled_at') or task.get('status') == 'done' or task.get('deleted_at'):
+        if not task.get('scheduled_at') or task.get('status') in {'done', 'skipped'} or task.get('deleted_at'):
             return []
         begin = dt.datetime.fromisoformat(task['scheduled_at'])
         end = begin + dt.timedelta(minutes=task['duration'])
@@ -523,7 +523,7 @@ class Store(NotebookMixin):
         source_tasks = tasks if tasks is not None else self.all('tasks')
         candidates = list(source_tasks) + recurring_previews(source_tasks, begin.date(), end.date())
         for other in candidates:
-            if other.get('id') == task.get('id') or other.get('deleted_at') or other['status'] == 'done' or not other.get('scheduled_at'):
+            if other.get('id') == task.get('id') or other.get('deleted_at') or other['status'] in {'done', 'skipped'} or not other.get('scheduled_at'):
                 continue
             if other.get('preview_for') == task.get('id'):
                 continue
@@ -548,13 +548,18 @@ class Store(NotebookMixin):
                 task['deleted_at'] = ''
             if not old:
                 task.update(created_at=stamp(), deleted_at='', completed_at='', spent_minutes=0, repeat_parent='', repeat_day=None)
+            if task['status'] == 'skipped' and (task['repeat'] == 'none' or (task.get('occurrence') or task.get('scheduled_at', '')[:10] or task.get('deadline') or now().date().isoformat()) > now().date().isoformat()):
+                raise ValueError('仅可以跳过已经到期的周期事项。')
             conflict = self.conflicts(task)
             if conflict:
                 raise ValueError('该时间与已有安排冲突：' + '、'.join(conflict[:3]))
-            if task['status'] == 'done' and (not old or old['status'] != 'done'):
+            if task['status'] in {'done', 'skipped'} and (not old or old['status'] not in {'done', 'skipped'}):
                 if task['repeat'] != 'none' and task.get('occurrence') and task['occurrence'] > now().date().isoformat():
                     raise ValueError('下一次周期事项尚未到期，请到当天再记录完成。')
-                task['completed_at'] = stamp()
+                if task['status'] == 'skipped' and task['repeat'] == 'none':
+                    raise ValueError('仅周期事项可以跳过本次。')
+                task['completed_at'] = stamp() if task['status'] == 'done' else ''
+                task['skipped_at'] = stamp() if task['status'] == 'skipped' else ''
                 # The recurring clone and completion are committed together. A repeated
                 # completion or undo/re-complete cannot create duplicate occurrences.
                 clone = None
@@ -568,7 +573,7 @@ class Store(NotebookMixin):
                     root_id = task.get('repeat_parent') or task['id']
                     occurrence = nxt.date().isoformat()
                     if not any(t.get('repeat_parent') == root_id and t.get('occurrence') == occurrence for t in self.all('tasks')):
-                        clone = {**task, 'id': uid(), 'status': 'todo', 'completed_at': '', 'spent_minutes': 0,
+                        clone = {**task, 'id': uid(), 'status': 'todo', 'completed_at': '', 'skipped_at': '', 'spent_minutes': 0,
                                  'created_at': stamp(), 'updated_at': stamp(), 'repeat_parent': root_id,
                                  'repeat_day': anchor, 'occurrence': occurrence,
                                  'deadline': occurrence if task['deadline'] else '',
@@ -584,6 +589,12 @@ class Store(NotebookMixin):
                 return task
             if task['status'] != 'done':
                 task['completed_at'] = ''
+            elif not task.get('completed_at'):
+                task['completed_at'] = stamp()
+            if task['status'] != 'skipped':
+                task['skipped_at'] = ''
+            elif not task.get('skipped_at'):
+                task['skipped_at'] = stamp()
             return self.put('tasks', task)
 
     def project_record(self, data, item_id=None):
@@ -1277,7 +1288,7 @@ updates 为建议更新已有事项，每项为 {"id":"已有ID","changes":{...�
         today = now().date().isoformat()
         settings = self.store.settings()
         for t in self.store.all('tasks'):
-            if t.get('deleted_at') or t['status'] == 'done':
+            if t.get('deleted_at') or t['status'] in {'done', 'skipped'}:
                 continue
             deadline = t.get('deadline')
             if deadline and deadline < today:
@@ -1389,7 +1400,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             image = self.server.store.note_image(path.split('/')[-1])
             if not image:
                 return self.send_json(404, {'error': '图片不存在。'})
-            return self.send_blob(image[1], image[0]['mime'])
+            return self.send_blob(image[1], image[0]['mime'], image[0]['name'] if image[0].get('kind') == 'document' else None)
         if path.startswith('/api/'):
             try:
                 if path == '/api/writing/drafts':
@@ -1470,16 +1481,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = urllib.parse.urlsplit(self.path).path
         store, assistant = self.server.store, self.server.assistant
         try:
-            if path == '/api/writing/images' and method == 'POST':
+            if path in {'/api/writing/images', '/api/writing/documents'} and method == 'POST':
                 length = int(self.headers.get('Content-Length', '0'))
                 content_type = self.headers.get('Content-Type', '')
-                if not 0 < length <= MAX_IMAGE_BYTES + 65536 or not content_type.startswith('multipart/form-data'):
+                if not 0 < length <= (20 * 1024 * 1024 if path.endswith('/documents') else MAX_IMAGE_BYTES) + 65536 or not content_type.startswith('multipart/form-data'):
                     raise ValueError('请选择一张不超过 8 MB 的图片。')
                 message = BytesParser(policy=email.policy.default).parsebytes(('Content-Type: '+content_type+'\r\nMIME-Version: 1.0\r\n\r\n').encode()+self.rfile.read(length))
                 parts = [p for p in message.iter_parts() if p.get_filename()] if message.is_multipart() else []
                 if len(parts) != 1:
                     raise ValueError('请每次插入一张图片。')
-                return self.send_json(201, store.add_note_image(parts[0].get_filename(), parts[0].get_payload(decode=True)))
+                handler = store.add_note_document if path.endswith('/documents') else store.add_note_image
+                return self.send_json(201, handler(parts[0].get_filename(), parts[0].get_payload(decode=True)))
             if path == '/api/files' and method == 'POST':
                 length = int(self.headers.get('Content-Length', '0'))
                 content_type = self.headers.get('Content-Type', '')
@@ -1579,6 +1591,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if len(parts) != 5:
                     raise ValueError('事项位置无效。')
                 return self.send_json(201, store.promote_task_to_project(parts[3], data))
+            if path.startswith('/api/tasks/') and path.endswith('/skip') and method == 'POST':
+                item_id = path.split('/')[3]
+                old = store.get('tasks', item_id)
+                if not old or old.get('deleted_at') or old.get('repeat') == 'none':
+                    raise ValueError('请选择尚未归档的周期事项。')
+                return self.send_json(200, store.task({'status': 'skipped'}, item_id))
             if path.startswith('/api/tasks/'):
                 item_id = path.split('/')[-1]
                 if method == 'DELETE':

@@ -28,7 +28,7 @@ import server as backend  # noqa: E402
 import background_reminders  # noqa: E402
 
 APP_NAME = 'Mainline'
-APP_DATA_VERSION = '2026-10-16-v12.1'
+APP_DATA_VERSION = '2026-11-14-v12.2'
 DEFAULT_PORT = 5179
 
 
@@ -141,6 +141,25 @@ def setup_error_log(data_dir: Path) -> None:
 
 
 class DesktopBridge:
+    def open_note_document(self, asset_id):
+        import re
+        if self._store is None or not re.fullmatch(r'[a-f0-9]{32}', str(asset_id)):
+            return {'error': '文档编号无效。'}
+        asset = self._store.note_image(asset_id)
+        if not asset or asset[0].get('kind') != 'document':
+            return {'error': '文档不存在。'}
+        from note_store import document_type
+        try:
+            _, suffix = document_type(asset[0]['name'], asset[1])
+            folder = self._store.dir / 'note-documents'
+            folder.mkdir(exist_ok=True)
+            target = folder / (asset_id + suffix)
+            target.write_bytes(asset[1])
+            os.startfile(str(target))
+            return {'opened': True}
+        except (OSError, ValueError):
+            return {'error': '无法打开文档，请检查文件格式及本机默认应用。'}
+
     def __init__(self):
         # pywebview walks every public attribute of js_api. Keep the native
         # Window private so it cannot recursively inspect the entire GUI.

@@ -239,6 +239,18 @@ srv.serve_forever()
     assert.match(download.suggestedFilename(), /\.zip$/);
     await download.saveAs(path.join(folder,'synthetic-export.zip'));
     await page.screenshot({path:path.join(root,'qa-artifacts','writing-verified.png')});
+    // Dropping a local PDF inserts a durable document link, preserving images.
+    await page.locator('#note-dialog').evaluate(el=>{
+      const transfer=new DataTransfer();transfer.items.add(new File(['%PDF-1.4\nSynthetic document\n%%EOF'],'fictional.pdf',{type:'application/pdf'}));
+      el.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:transfer}));
+    });
+    const documentLink=body.locator('a[href^="/note-assets/"]').filter({hasText:'fictional.pdf'});
+    await documentLink.waitFor();
+    await until(async()=>(await getState()).notes[0].content.includes('fictional.pdf'));
+    const attachmentResponse=await page.request.get(base+await documentLink.getAttribute('href'));
+    assert.equal(await attachmentResponse.text(),'%PDF-1.4\nSynthetic document\n%%EOF');
+    assert.match(attachmentResponse.headers()['content-disposition'],/attachment/);
+
     await page.locator('#writing-back').click();
     await page.locator('[data-action=edit-note]').first().click();
     await body.waitFor(); await until(() => page.locator('#writing-fallback').isHidden());
@@ -278,6 +290,21 @@ srv.serve_forever()
     const unchanged = (await getState()).notes.find(n => n.id === legacy.id);
     assert.equal(unchanged.content, legacy.content, 'Opening an old plain-text note must not rewrite its body');
     assert.equal(unchanged.revision, legacy.revision);
+    const skippedResponse=await page.request.post(base+'/api/tasks',{headers:{'X-Personal-Desk':'1'},data:{title:'Synthetic skipped cycle',repeat:'daily',deadline:today}});
+    const cycle=await skippedResponse.json();
+    await page.evaluate(()=>{view='home';refresh();});
+    await page.locator('.task-card[data-task="'+cycle.id+'"] .task-menu').first().click();
+    await page.locator('#skip-task').click();
+    await until(async()=>(await getState()).tasks.find(t=>t.id===cycle.id)?.status==='skipped');
+    await page.locator('.quadrants .task-card[data-task="'+cycle.id+'"]').waitFor({state:'hidden'});
+    await page.locator('#show-done').check();
+    await page.locator('.task-card[data-task="'+cycle.id+'"] .skip-badge').waitFor();
+    await page.locator('#show-done').uncheck();
+    const projectResponse=await page.request.post(base+'/api/projects',{headers:{'X-Personal-Desk':'1'},data:{name:'Synthetic visual project',area:'Demo area',project_type:'project',progress:65,milestones:[{title:'Synthetic milestone',done:true}]}});
+    const visualProject=await projectResponse.json();
+    await page.evaluate(async id=>{await refresh();view='projects';projectArea='Demo area';selectedProjectId=id;render();},visualProject.id);
+    assert.equal(await page.locator('.progress-orbit').getAttribute('aria-valuenow'),'65');
+    await page.locator('.progress-dashboard').screenshot({path:path.join(root,'qa-artifacts','project-progress-v12.2.png')});
     assert.deepEqual(external, [], 'Editor must not send any request to outside services');
     assert.deepEqual(failures, [], 'No missing local editor dependencies');
     assert.deepEqual(errors, [], 'No JS or CSP console errors');

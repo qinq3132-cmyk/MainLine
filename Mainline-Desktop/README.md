@@ -4,7 +4,7 @@
 
 ## 打开和停止
 
-可从 GitHub [直接下载单文件 EXE](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-10-16-v12.1.exe)，放到自己选择的文件夹后双击运行；无需安装 Python。详细步骤见 [Windows EXE 安装说明](Windows-EXE-安装.md)。它是免安装桌面版，不是 Setup 安装器。V12.1 小版本修复笔记工具栏文字重叠；四象限将执行时间、截止日期和周期日期放在同一时间顺序中，完全未定日期的事项靠后，同日仅有日期的事项排在定时事项之后。
+可从 GitHub [直接下载单文件 EXE](https://github.com/qinq3132-cmyk/MainLine/raw/refs/heads/main/Mainline-Desktop/downloads/Mainline-2026-11-14-v12.2.exe)，放到自己选择的文件夹后双击运行；无需安装 Python。详细步骤见 [Windows EXE 安装说明](Windows-EXE-安装.md)。它是免安装桌面版，不是 Setup 安装器。V12.2 免安装版支持跳过本次周期并保留未完成记录、拖入 PDF 等文档作为笔记附件链接，并增加项目环形进度与阶段提示。
 
 本机验收过的文件夹版位于 `release/2026-10-15/Mainline/Mainline.exe`。使用文件夹版时必须保留同目录的 `_internal` 文件夹；不要只复制其中的 EXE。
 

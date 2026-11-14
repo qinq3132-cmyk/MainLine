@@ -247,6 +247,7 @@ window.Writing = (() => {
           cache:{enable:false}, resize:{enable:false}, outline:{enable:false, position:'right'},
           toolbar:['headings','bold','italic','strike','|','list','ordered-list','quote','link',
             {name:'local-image', tip:'插入本机图片', icon:'<svg viewBox="0 0 24 24"><path d="M3 3h18v18H3V3zm2 2v10l4-4 4 4 3-3 3 3V5H5zm0 14h14l-3-4-3 3-4-4-4 4v1z"/></svg>', click:() => q('#writing-image').click()},
+            {name:'local-document',tip:'插入本机文档（PDF 等）',icon:'<span style="font-size:17px">▤</span>',click:()=>q('#writing-document').click()},
             '|','undo','redo','|','edit-mode','outline'],
           toolbarConfig:{pin:true}, hint:{emoji:{}, emojiPath:'/vendor/vditor/images'},
           preview:{maxWidth:1040, actions:[], hljs:{enable:false}, theme:{current:'', list:[]},
@@ -390,6 +391,40 @@ window.Writing = (() => {
   form.elements.project_id.addEventListener('change', changed);
   q('#writing-fallback').addEventListener('input', () => { session.content = q('#writing-fallback').value; session.format = 'markdown'; changed(); });
   q('#writing-image').addEventListener('change', async e => { await insertImages([...e.target.files]); e.target.value = ''; });
+  async function insertDocuments(files) {
+    if (!session || uploading) return;
+    const current=session;uploading=true;status('正在保存本机文档…');
+    try {
+      for(const file of files){
+        if(file.size>20*1024*1024)throw new Error('每个文档最多 20 MB。');
+        const body=new FormData();body.append('file',file);
+        const response=await fetch('/api/writing/documents',{method:'POST',headers:{'X-Personal-Desk':'1'},body});
+        const asset=await response.json();if(!response.ok)throw new Error(asset.error||'文档保存失败。');
+        if(session!==current)return;
+        const name=file.name.replace(/[\\[\]\\\r\n]/g,'_').slice(0,160)||'文档';
+        const markdown=`\n[📎 ${name}](${asset.url})\n`;
+        if(editor&&!q('#writing-editor').hidden){restoreRange();editor.insertValue(markdown);current.content=editor.getValue();}
+        else{const box=q('#writing-fallback');box.setRangeText(markdown,box.selectionStart,box.selectionEnd,'end');current.content=box.value;}
+        current.format='markdown';changed();
+      }
+      await flush();
+    }catch(e){error(e.message);}finally{uploading=false;}
+  }
+  q('#writing-document').addEventListener('change',async e=>{await insertDocuments([...e.target.files]);e.target.value='';});
+  dialog.addEventListener('dragover',e=>{if(e.dataTransfer?.types.includes('Files')){e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect='copy';}},true);
+  dialog.addEventListener('drop',async e=>{
+    const files=[...(e.dataTransfer?.files||[])];if(!files.length)return;
+    e.preventDefault();e.stopImmediatePropagation();rememberRange();
+    for(const file of files){if(file.type.startsWith('image/'))await insertImages([file]);else await insertDocuments([file]);}
+  },true);
+  dialog.addEventListener('click',async e=>{
+    const link=e.target.closest('a[href]');if(!link)return;
+    const url=new URL(link.href,location.href);
+    if(url.origin!==location.origin||!/^\/note-assets\/[a-f0-9]{32}$/.test(url.pathname))return;
+    e.preventDefault();e.stopImmediatePropagation();
+    if(window.pywebview?.api?.open_note_document){const result=await window.pywebview.api.open_note_document(url.pathname.split('/').pop());if(result.error)error(result.error);}
+    else window.open(url.href,'_blank','noopener');
+  },true);
   for (const key of ['font','spacing','width']) q('#writing-' + key).addEventListener('change', applyPreferences);
   q('#writing-focus').addEventListener('click', () => {
     dialog.classList.toggle('writing-focused'); q('#writing-focus').setAttribute('aria-pressed', dialog.classList.contains('writing-focused'));
